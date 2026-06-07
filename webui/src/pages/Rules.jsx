@@ -57,10 +57,10 @@ export default function RulesPage() {
     id: rule.id,
     action: rule.action,
     protocol: rule.protocol,
-    srcIp: rule.src_ip || 'ANY',
-    dstIp: rule.dst_ip || 'ANY',
-    srcPort: rule.src_port || 'ANY',
-    dstPort: rule.dst_port || 'ANY',
+    srcIp: rule.srcIp || 'ANY',
+    dstIp: rule.dstIp || 'ANY',
+    srcPort: rule.srcPort || 'ANY',
+    dstPort: rule.dstPort || 'ANY',
     description: rule.description || '-',
     delete: rule.id
   }));
