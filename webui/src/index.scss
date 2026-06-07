@@ -1,0 +1,75 @@
+// Carbon Design System - SCSS Configuration
+// Set g100 (dark) as the default global theme at the build level.
+// The React <Theme> component overrides this dynamically at runtime.
+@use '@carbon/react/scss/themes';
+@use '@carbon/react/scss/theme' with (
+  $theme: themes.$g100
+);
+@use '@carbon/react';
+
+// Foundational viewport setup — required by any SPA to ensure
+// the #root React container fills the browser window.
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+// Carbon's <Theme> component renders a wrapper <div> that does not
+// fill the viewport by default. This class ensures it does, and
+// pulls the background-color from the active Carbon theme token.
+.app-shell {
+  min-height: 100vh;
+  background-color: var(--cds-background);
+}
+
+// Login page container with generated background
+.login-page-container {
+  position: absolute;
+  inset: 0;
+  background-image: url('/login-background.png');
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cds-spacing-07);
+}
+
+.login-box {
+  width: 100%;
+  max-width: 450px;
+  min-width: 300px;
+}
+
+// Ensure the main content area has no padding so the inner theme takes full width
+.content-wrapper {
+  padding: 0 !important;
+}
+
+// The inner theme wrapper provides the actual padding and background
+.content-theme {
+  min-height: calc(100vh - 3rem);
+  background-color: var(--cds-background);
+  padding: 2rem;
+}
+
+// Custom text colors for dashboard metrics
+.success-text {
+  color: var(--cds-support-success);
+}
+.warning-text {
+  color: var(--cds-support-warning);
+}
+.danger-text {
+  color: var(--cds-support-error);
+}
+
+// Layout utilities
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}

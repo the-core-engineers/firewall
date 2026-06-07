@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+scapy
+pydantic
+aiosqlite
+bcrypt
+python-jose
+python-multipart
