@@ -20,7 +20,14 @@ export function AppProvider({ children }) {
   const [rules, setRules] = useState([]);
   const [logs, setLogs] = useState([]);
   const [blocklist, setBlocklist] = useState([]);
-  const [stats, setStats] = useState({ analyzed: 0, allowed: 0, dropped: 0, blocked: 0, traffic: initialTraffic });
+  const [stats, setStats] = useState({
+    analyzed: 0,
+    allowed: 0,
+    dropped: 0,
+    blocked: 0,
+    traffic: [],
+    packetsPerSec: initialTraffic
+  });
   const [settings, setSettings] = useState({ rate_limit: '1000', theme: 'g100', default_policy: 'ALLOW' });
 
   const fetchStatus = useCallback(async () => {
@@ -72,13 +79,14 @@ export function AppProvider({ children }) {
       if (res.ok) {
         const newStats = await res.json();
         setStats(prev => {
-          if (isInitialLoad) return { ...newStats, traffic: prev.traffic };
+          if (isInitialLoad) return { ...newStats, packetsPerSec: prev.packetsPerSec };
           const delta = Math.max(0, newStats.analyzed - prev.analyzed);
-          let newTraffic = [...prev.traffic];
-          newTraffic.push({ group: 'Packets/sec', value: delta });
-          if (newTraffic.length > 60) newTraffic = newTraffic.slice(-60);
-          newTraffic = newTraffic.map((pt, i) => ({ ...pt, index: i }));
-          return { ...newStats, traffic: newTraffic };
+          let newPps = [...prev.packetsPerSec];
+          newPps.push({ group: 'Packets/sec', value: delta });
+          if (newPps.length > 60) newPps = newPps.slice(-60);
+          newPps = newPps.map((pt, i) => ({ ...pt, index: i }));
+
+          return { ...newStats, traffic: newStats.traffic || [], packetsPerSec: newPps };
         });
       }
     } catch (_) {}

@@ -30,6 +30,52 @@ current_outbound = 0
 def is_local_ip(ip):
     return ip.startswith('192.168.') or ip.startswith('10.') or ip.startswith('172.16.') or ip.startswith('127.')
 
+def port_matches(rule_port: str, packet_port) -> bool:
+    """
+    Check whether a packet port satisfies a rule port specification.
+
+    Supported rule_port formats (all stored as plain TEXT in the DB):
+      - Single port  : '80'
+      - Range        : '49152-65535'   (low-high, inclusive)
+      - Comma list   : '80,443,8080'   (exact values)
+
+    packet_port can be an int or a string; None/empty always returns False.
+    A None/empty rule_port means "any port" — callers skip this check entirely.
+    """
+    if not rule_port:
+        return True                          # no restriction → always matches
+    if packet_port is None or packet_port == '':
+        return False                         # rule wants a port, packet has none
+
+    try:
+        pkt = int(packet_port)
+    except (ValueError, TypeError):
+        return False                         # unparseable packet port → no match
+
+    rule_port = rule_port.strip()
+
+    # Range: "49152-65535"
+    if '-' in rule_port:
+        parts = rule_port.split('-', 1)
+        try:
+            low, high = int(parts[0]), int(parts[1])
+            return low <= pkt <= high
+        except ValueError:
+            return False
+
+    # Comma list: "80,443,8080"
+    if ',' in rule_port:
+        try:
+            return pkt in {int(p.strip()) for p in rule_port.split(',')}
+        except ValueError:
+            return False
+
+    # Single port: "80"
+    try:
+        return pkt == int(rule_port)
+    except ValueError:
+        return False
+
 def evaluate_packet(packet_info, rules, settings, blocklist):
     global packet_counts_per_ip, flood_counts_per_ip, last_minute_reset, last_second_reset
     src_ip = packet_info.get('srcIp')
@@ -66,9 +112,9 @@ def evaluate_packet(packet_info, rules, settings, blocklist):
             match = False
         if rule['dstIp'] and rule['dstIp'] != packet_info.get('dstIp'):
             match = False
-        if rule['srcPort'] and rule['srcPort'] != str(packet_info.get('srcPort')):
+        if rule['srcPort'] and not port_matches(rule['srcPort'], packet_info.get('srcPort')):
             match = False
-        if rule['dstPort'] and rule['dstPort'] != str(packet_info.get('dstPort')):
+        if rule['dstPort'] and not port_matches(rule['dstPort'], packet_info.get('dstPort')):
             match = False
             
         if match:
