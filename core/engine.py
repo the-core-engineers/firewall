@@ -121,7 +121,12 @@ def evaluate_packet(packet_info, rules, settings, blocklist):
             reason = rule['description'] if rule['description'] else f"Matched rule {rule['id']}"
             return rule['action'], reason, rule
             
-    return 'ALLOW', "Default allow policy", None
+    default_policy = settings.get('default_policy', 'ALLOW').upper()
+    
+    if default_policy == 'DROP':
+        return 'DROP', "Default drop policy ", None
+    else:
+        return 'ALLOW', "Default allow policy ", None
 
 def packet_callback(packet):
     global captured_packets
