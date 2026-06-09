@@ -198,7 +198,8 @@ async def seed_db_async():
             default_settings = [
                 ('rate_limit', '1000'),
                 ('flood_threshold', '100'),
-                ('theme', 'white')
+                ('theme', 'white'),
+                ('default_policy', 'ALLOW')
             ]
             await db.executemany('''
                 INSERT INTO settings (key, value) VALUES (?, ?)
