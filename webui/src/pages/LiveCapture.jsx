@@ -3,24 +3,41 @@ import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, T
 import { Play, Stop, TrashCan } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
+import { useNotification } from '../context/NotificationContext';
 
 export default function LiveCapturePage() {
   const { authFetch } = useAuth();
   const { status, fetchStatus, packets, setPackets } = useAppContext();
+  const { addNotification } = useNotification();
 
   const handleStartCapture = async () => {
-    await authFetch('/capture/start', { method: 'POST' });
+    const res = await authFetch('/capture/start', { method: 'POST' });
+    if (res.ok) {
+      addNotification('success', 'Capture Started', 'The firewall engine is now analyzing live traffic.');
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to start packet capture.');
+    }
     fetchStatus();
   };
 
   const handleStopCapture = async () => {
-    await authFetch('/capture/stop', { method: 'POST' });
+    const res = await authFetch('/capture/stop', { method: 'POST' });
+    if (res.ok) {
+      addNotification('success', 'Capture Stopped', 'The firewall engine has paused live capture.');
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to stop packet capture.');
+    }
     fetchStatus();
   };
 
   const handleClearCapture = async () => {
-    await authFetch('/capture/clear', { method: 'POST' });
-    setPackets([]);
+    const res = await authFetch('/capture/clear', { method: 'POST' });
+    if (res.ok) {
+      addNotification('info', 'Buffer Cleared', 'The live packet buffer has been flushed.');
+      setPackets([]);
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to clear packet buffer.');
+    }
   };
 
   const isCapturing = status === 'capturing';

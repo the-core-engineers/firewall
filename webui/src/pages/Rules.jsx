@@ -3,10 +3,12 @@ import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, T
 import { TrashCan } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
+import { useNotification } from '../context/NotificationContext';
 
 export default function RulesPage() {
   const { authFetch } = useAuth();
   const { rules, fetchRules } = useAppContext();
+  const { addNotification } = useNotification();
   const [newRule, setNewRule] = useState({
     action: 'ALLOW',
     protocol: 'ANY',
@@ -28,18 +30,28 @@ export default function RulesPage() {
       dstPort: newRule.dst_port ? newRule.dst_port : null,
       description: newRule.description || null
     };
-    await authFetch('/rules', {
+    const res = await authFetch('/rules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    setNewRule({ action: 'ALLOW', protocol: 'ANY', src_ip: '', dst_ip: '', src_port: '', dst_port: '', description: '' });
-    fetchRules();
+    if (res.ok) {
+      addNotification('success', 'Rule Created', 'Firewall rule has been created successfully.');
+      setNewRule({ action: 'ALLOW', protocol: 'ANY', src_ip: '', dst_ip: '', src_port: '', dst_port: '', description: '' });
+      fetchRules();
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to create firewall rule.');
+    }
   };
 
   const handleDeleteRule = async (ruleId) => {
-    await authFetch(`/rules/${ruleId}`, { method: 'DELETE' });
-    fetchRules();
+    const res = await authFetch(`/rules/${ruleId}`, { method: 'DELETE' });
+    if (res.ok) {
+      addNotification('info', 'Rule Deleted', 'Firewall rule has been removed.');
+      fetchRules();
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to delete firewall rule.');
+    }
   };
 
   const ruleHeaders = [

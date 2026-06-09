@@ -3,28 +3,40 @@ import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, T
 import { TrashCan } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
+import { useNotification } from '../context/NotificationContext';
 
 export default function BlocklistPage() {
   const { authFetch } = useAuth();
   const { blocklist, fetchBlocklist } = useAppContext();
+  const { addNotification } = useNotification();
   const [newBlockIp, setNewBlockIp] = useState('');
   const [newBlockReason, setNewBlockReason] = useState('');
 
   const handleAddBlocklist = async (e) => {
     e.preventDefault();
-    await authFetch('/blocklist', {
+    const res = await authFetch('/blocklist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip: newBlockIp, reason: newBlockReason || 'Manual block' })
     });
-    setNewBlockIp('');
-    setNewBlockReason('');
-    fetchBlocklist();
+    if (res.ok) {
+      addNotification('success', 'IP Blocked', `Successfully added ${newBlockIp} to the blocklist.`);
+      setNewBlockIp('');
+      setNewBlockReason('');
+      fetchBlocklist();
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to add IP to blocklist.');
+    }
   };
 
   const handleRemoveBlocklist = async (ip) => {
-    await authFetch(`/blocklist/${ip}`, { method: 'DELETE' });
-    fetchBlocklist();
+    const res = await authFetch(`/blocklist/${ip}`, { method: 'DELETE' });
+    if (res.ok) {
+      addNotification('info', 'IP Unblocked', 'Successfully removed IP from the blocklist.');
+      fetchBlocklist();
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to remove IP from blocklist.');
+    }
   };
 
   const blocklistHeaders = [

@@ -3,14 +3,21 @@ import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, T
 import { TrashCan, Renew } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
+import { useNotification } from '../context/NotificationContext';
 
 export default function LogsPage() {
   const { authFetch } = useAuth();
   const { logs, fetchLogs } = useAppContext();
+  const { addNotification } = useNotification();
 
   const handleClearLogs = async () => {
-    await authFetch('/logs', { method: 'DELETE' });
-    fetchLogs();
+    const res = await authFetch('/logs', { method: 'DELETE' });
+    if (res.ok) {
+      addNotification('info', 'Logs Cleared', 'Historical security event logs have been permanently deleted.');
+      fetchLogs();
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to clear security logs.');
+    }
   };
 
   const logHeaders = [

@@ -3,10 +3,12 @@ import { Stack, Button, Form, FormGroup, Select, SelectItem, TextInput } from '@
 import { Save } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
+import { useNotification } from '../context/NotificationContext';
 
 export default function SettingsPage() {
   const { authFetch } = useAuth();
   const { settings, setSettings, fetchSettings } = useAppContext();
+  const { addNotification } = useNotification();
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -14,9 +16,10 @@ export default function SettingsPage() {
     // The backend expects individual POST requests for each setting
     const settingKeys = ['rate_limit', 'theme', 'default_policy'];
     
+    let hasError = false;
     for (const key of settingKeys) {
       if (settings[key] !== undefined) {
-        await authFetch('/settings', {
+        const res = await authFetch('/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -24,7 +27,14 @@ export default function SettingsPage() {
             value: settings[key].toString()
           })
         });
+        if (!res.ok) hasError = true;
       }
+    }
+    
+    if (!hasError) {
+      addNotification('success', 'Settings Saved', 'Engine configuration applied successfully.');
+    } else {
+      addNotification('error', 'Action Failed', 'Failed to save one or more settings.');
     }
     fetchSettings();
   };

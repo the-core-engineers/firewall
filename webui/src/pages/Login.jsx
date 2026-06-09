@@ -15,11 +15,11 @@ export default function Login() {
 
   return (
     <Theme theme="g100" className="login-page-container">
-      <Header aria-label="Firewall Header">
-        <HeaderName href="#" prefix="">Firewall</HeaderName>
-        <HeaderNavigation aria-label="Header Navigation" style={{ marginLeft: 'auto' }}>
+      <Header aria-label="BASTION Header">
+        <HeaderName href="#" prefix="">BASTION</HeaderName>
+        {/* THIS IS COMMENTED OUT <HeaderNavigation aria-label="Header Navigation" style={{ marginLeft: 'auto' }}>
           <HeaderMenuItem href="#">Terms of Conditions</HeaderMenuItem>
-        </HeaderNavigation>
+        </HeaderNavigation> */}
       </Header>
       <Tile className="login-box">
         <Stack gap={7}>
@@ -34,7 +34,8 @@ export default function Login() {
               <Button type="submit" size="lg" renderIcon={LoginIcon}>Sign in</Button>
             </Stack>
           </FluidForm>
-          <InlineNotification kind="info" lowContrast hideCloseButton title="Notice" subtitle="This web application was made for authorized network security administration." style={{ marginTop: 'var(--cds-spacing-05)', maxWidth: '100%' }} />
+          <InlineNotification kind="warning" lowContrast hideCloseButton title="Notice" subtitle="The webui interface is under development and is subject to change." style={{ marginTop: 'var(--cds-spacing-05)', maxWidth: '100%' }} />
+          <InlineNotification kind="info" lowContrast title="Version" subtitle="Codename: Alpha X" style={{ marginTop: 'var(--cds-spacing-05)', maxWidth: '100%' }} />
         </Stack>
       </Tile>
     </Theme>

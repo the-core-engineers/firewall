@@ -12,9 +12,9 @@ export default function AppShell({ children }) {
 
   return (
     <Theme theme="g100">
-      <Header aria-label="Firewall Header">
+      <Header aria-label="BASTION Header">
         <HeaderMenuButton aria-label="Open menu" isCollapsible onClick={() => setIsSideNavExpanded(!isSideNavExpanded)} isActive={isSideNavExpanded} />
-        <HeaderName href="#" prefix="">Firewall</HeaderName>
+        <HeaderName href="#" prefix="">BASTION</HeaderName>
         <HeaderGlobalBar>
           <HeaderGlobalAction aria-label="Logout" tooltipAlignment="end" onClick={logout}>
             <Logout size={20} />

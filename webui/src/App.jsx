@@ -1,6 +1,7 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider, useAppContext } from './context/AppContext';
+import { NotificationProvider } from './context/NotificationContext';
 import AppShell from './components/AppShell';
 
 import Login from './pages/Login';
@@ -43,9 +44,11 @@ function AppRouter() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppProvider>
-        <AppRouter />
-      </AppProvider>
+      <NotificationProvider>
+        <AppProvider>
+          <AppRouter />
+        </AppProvider>
+      </NotificationProvider>
     </AuthProvider>
   );
 }
