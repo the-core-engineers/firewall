@@ -73,3 +73,8 @@ body,
   justify-content: space-between;
   align-items: center;
 }
+
+// Ensure the SideNav has a visible dividing line
+.cds--side-nav {
+  border-right: 1px solid var(--cds-border-subtle) !important;
+}

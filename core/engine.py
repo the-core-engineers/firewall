@@ -168,7 +168,7 @@ def packet_callback(packet):
             
         packet_info = {
             'id': str(uuid.uuid4())[:8],
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'time': datetime.fromtimestamp(float(packet.time)).strftime("%Y-%m-%d %H:%M:%S"),
             'srcIp': src_ip,
             'dstIp': dst_ip,
             'protocol': 'OTHER',

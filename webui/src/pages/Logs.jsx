@@ -1,5 +1,5 @@
-import React from 'react';
-import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, TableHeader, TableBody, TableCell, Tag } from '@carbon/react';
+import React, { useState } from 'react';
+import { Stack, Button, DataTable, TableContainer, Table, TableHead, TableRow, TableHeader, TableBody, TableCell, Tag, Pagination } from '@carbon/react';
 import { TrashCan, Renew } from '@carbon/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { useAppContext } from '../context/AppContext';
@@ -9,6 +9,9 @@ export default function LogsPage() {
   const { authFetch } = useAuth();
   const { logs, fetchLogs } = useAppContext();
   const { addNotification } = useNotification();
+
+  const [firstRowIndex, setFirstRowIndex] = useState(0);
+  const [currentPageSize, setCurrentPageSize] = useState(100);
 
   const handleClearLogs = async () => {
     const res = await authFetch('/logs', { method: 'DELETE' });
@@ -62,7 +65,7 @@ export default function LogsPage() {
         </div>
       </Stack>
 
-      <DataTable rows={mappedLogs} headers={logHeaders}>
+      <DataTable rows={mappedLogs.slice(firstRowIndex, firstRowIndex + currentPageSize)} headers={logHeaders}>
         {({ rows, headers, getTableProps, getHeaderProps, getRowProps }) => (
           <TableContainer title="Event History">
             <Table {...getTableProps()}>
@@ -93,6 +96,23 @@ export default function LogsPage() {
           </TableContainer>
         )}
       </DataTable>
+      <Pagination
+        totalItems={mappedLogs.length}
+        backwardText="Previous page"
+        forwardText="Next page"
+        page={Math.floor(firstRowIndex / currentPageSize) + 1}
+        pageSize={currentPageSize}
+        pageSizes={[20, 50, 100, 1000]}
+        itemsPerPageText="Items per page:"
+        onChange={({ page, pageSize }) => {
+          if (pageSize !== currentPageSize) {
+            setCurrentPageSize(pageSize);
+            setFirstRowIndex(0);
+          } else {
+            setFirstRowIndex((page - 1) * pageSize);
+          }
+        }}
+      />
     </Stack>
   );
 }
