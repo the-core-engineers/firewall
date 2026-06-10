@@ -14,7 +14,7 @@ export default function SettingsPage() {
     e.preventDefault();
     
     // The backend expects individual POST requests for each setting
-    const settingKeys = ['rate_limit', 'theme', 'default_policy'];
+    const settingKeys = ['rate_limit', 'flood_threshold', 'theme', 'default_policy'];
     
     let hasError = false;
     for (const key of settingKeys) {
@@ -54,8 +54,9 @@ export default function SettingsPage() {
                 <SelectItem value="DROP" text="DROP ALL" />
               </Select>
             </FormGroup>
-            <FormGroup legendText="Rate Limiting">
-              <TextInput id="settings-rate" labelText="Max Packets Per Second" helperText="Automatically drops packets exceeding this limit to prevent DoS attacks." value={settings.rate_limit} onChange={e => setSettings({...settings, rate_limit: e.target.value})} type="number" />
+            <FormGroup legendText="Rate Limiting & Flood Detection">
+              <TextInput id="settings-flood" labelText="Flood Threshold (Packets / Second)" helperText="Instantly adds the IP to the Blocklist if it exceeds this burst limit." value={settings.flood_threshold || ''} onChange={e => setSettings({...settings, flood_threshold: e.target.value})} type="number" />
+              <TextInput id="settings-rate" labelText="Rate Limit (Packets / Minute)" helperText="Silently drops excess packets from an IP once it hits this minute-based limit." value={settings.rate_limit || ''} onChange={e => setSettings({...settings, rate_limit: e.target.value})} type="number" />
             </FormGroup>
             <FormGroup legendText="Appearance">
               <Select id="settings-theme" labelText="UI Theme" helperText="Changes the content area theme (shell remains dark)." value={settings.theme} onChange={e => setSettings({...settings, theme: e.target.value})}>
