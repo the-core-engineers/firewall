@@ -11,6 +11,8 @@ from api.logs import router as logs_router
 from api.capture import router as capture_router
 from api.tester import router as tester_router
 
+from engine import refresh_cache
+
 app = FastAPI()
 
 app.add_middleware(
@@ -28,6 +30,7 @@ init_db()
 async def startup_event():
     # Seed db defaults async
     await seed_db_async()
+    refresh_cache()
 
 app.include_router(login_router)
 app.include_router(rules_router)

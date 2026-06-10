@@ -5,6 +5,11 @@ from datetime import datetime
 from scapy.all import sniff, IP, TCP, UDP, ICMP
 from database import get_db_data, add_to_blocklist_sync, log_packet
 
+# for capturing rules in cache memory than creating DB connection EVERY SINGLE TIME!
+cached_rules = []
+cached_settings = {}
+cached_blocklist = []
+
 captured_packets = []
 is_capturing = False
 capture_thread = None
@@ -29,6 +34,11 @@ current_outbound = 0
 # A simple heuristic for local network (can be expanded)
 def is_local_ip(ip):
     return ip.startswith('192.168.') or ip.startswith('10.') or ip.startswith('172.16.') or ip.startswith('127.')
+
+# this function is designed to refresh the cache memory every time rule changes.
+def refresh_cache():
+    global cached_rules, cached_settings, cached_blocklist
+    cached_rules, cached_settings, cached_blocklist = get_db_data()
 
 def port_matches(rule_port: str, packet_port) -> bool:
     """
@@ -187,7 +197,11 @@ def packet_callback(packet):
         elif ICMP in packet:
             packet_info['protocol'] = 'ICMP'
 
-        rules, settings, blocklist = get_db_data()
+        # rules, settings, blocklist = get_db_data() - this causes problem when there are large no. of packets - the below code is optimized
+        rules = cached_rules
+        settings = cached_settings
+        blocklist = cached_blocklist
+
         action, reason, rule = evaluate_packet(packet_info, rules, settings, blocklist)
 
         # Update Counters

@@ -5,6 +5,7 @@ import aiosqlite
 from models import Rule, RuleResponse
 from database import DB_PATH
 from login import get_current_user
+from engine import refresh_cache # this is related to rule-caching branch
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
@@ -28,6 +29,9 @@ async def add_rule(rule: Rule, user: str = Depends(get_current_user)):
             rule.srcPort, rule.dstPort, rule.description
         ))
         await db.commit()
+
+    refresh_cache()
+
     return RuleResponse(id=rule_id, **rule.dict())
 
 @router.delete("/{rule_id}")
@@ -35,4 +39,7 @@ async def delete_rule(rule_id: str, user: str = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
         await db.commit()
+
+    refresh_cache()
+    
     return {"message": "Rule deleted"}
