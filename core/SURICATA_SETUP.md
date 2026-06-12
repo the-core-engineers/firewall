@@ -70,29 +70,15 @@ Once Suricata is running and writing to `eve.json`, start your FastAPI backend:
 sudo python3 -m uvicorn main:app --reload
 ```
 
-## 5. OS-Agnostic Kernel Integration (`pf` & `iptables`)
-The Python backend (`core/engine.py`) has been fully abstracted to operate natively on both macOS and Linux.
+## 5. OS-Agnostic Kernel Integration (DEPRECATED)
+The old Python backend (`core/engine.py`) previously managed macOS `pf` and Linux `iptables`. **This has been completely stripped out.**
 
-- **On macOS:** It automatically generates a `pf_custom.conf` file and injects it into Apple's kernel using `pfctl`.
-- **On Linux:** It automatically generates an `iptables_custom.rules` file and injects it into the Netfilter stack using `iptables-restore` (linked to a custom `SURICATA_BLOCKS` chain).
+The firewall now utilizes a strictly decoupled **Hybrid Architecture**:
+- **Python FastAPI** continues to serve the React WebUI and API.
+- **Rust Data Plane** (located in `core/rust-engine`) handles all actual packet dropping natively at the hardware level using **eBPF/XDP** and **nftables**.
 
-**Note:** Both `pf` and `iptables` require root privileges to manipulate kernel routing tables. The Python backend **must** be run with `sudo` for any rule enforcement or IPS auto-blocking to function.
+Because of the reliance on native Linux eBPF, **the firewall engine can no longer run on macOS or Windows**. You must deploy it to a Linux environment.
 
-## 6. Enterprise Performance Optimization (Linux Only)
-Deep Packet Inspection is inherently CPU-intensive. To deploy this firewall in a high-throughput enterprise environment without bottlenecking the CPU, you must apply the following optimizations in `suricata.yaml` and your Linux OS:
-
-### A. eBPF / XDP (eXpress Data Path)
-XDP allows Linux to drop packets directly at the Network Interface Card (NIC) driver level, bypassing the Linux kernel networking stack entirely.
-- In `suricata.yaml`, enable `ebpf:` and `xdp-mode: hw` (hardware offload).
-- When a threat is detected, Suricata compiles the block rule into eBPF bytecode and pushes it to the NIC, saving massive CPU cycles.
-
-### B. Fast Packet Acquisition (`AF_PACKET`)
-Do not use standard `pcap` on Linux for high speeds. 
-- In `suricata.yaml`, configure the `af-packet:` section. Set `cluster-type: cluster_flow` and enable `tpacket-v3`. This allows the Linux kernel to load-balance packets across multiple Suricata worker threads efficiently.
-
-### C. BPF Pre-Filtering
-Not all traffic needs Deep Packet Inspection. Encrypted video streaming (e.g., Netflix, YouTube) uses massive bandwidth but cannot be deeply inspected anyway. 
-- Create a `bpf-filter` to bypass DPI for heavy, trusted streaming domains or specific subnets. This immediately reduces Suricata's CPU load by 40-60%.
-
-### D. CPU Pinning (Worker Threads)
-Configure `threading:` in `suricata.yaml`. Pin the management/capture threads to CPU Core 0, and pin the worker threads exclusively to Cores 1-N. This prevents the Linux scheduler from moving threads around, significantly reducing L3 cache misses and context-switching latency.
+For complete deployment and compilation instructions for the new XDP engine, refer to the new documentation:
+- **[Rust Engine README](../rust-engine/README.md)**
+- **[Comprehensive Testing Guide](../../manual/TESTING_GUIDE.md)**
