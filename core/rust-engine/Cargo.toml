@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "rust-engine",
+    "rust-engine-ebpf",
+    "rust-engine-common",
+]
+resolver = "2"

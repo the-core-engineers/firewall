@@ -1,0 +1,15 @@
+[package]
+name = "rust-engine-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-ebpf = "0.1.0"
+aya-log-ebpf = "0.1.0"
+rust-engine-common = { path = "../rust-engine-common" }
+network-types = "0.0.4"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
