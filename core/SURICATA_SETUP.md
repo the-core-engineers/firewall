@@ -1,30 +1,19 @@
-# Suricata & pf Configuration Guide (macOS)
+# Suricata Configuration Guide (Linux Only)
 
-This document provides the instructions necessary to deploy the Intrusion Detection System (Suricata) and kernel-level packet filtering (`pf`) on your target macOS environment. 
+This document provides the instructions necessary to deploy the Intrusion Detection System (Suricata) on your target Linux environment (e.g., Ubuntu Server).
 
-> **WARNING**: Do not execute these steps on your development machine unless you explicitly intend to start intercepting traffic locally.
+Because our high-performance Data Plane is written in Rust and utilizes native Linux eBPF (XDP) and `nftables`, **this firewall cannot be run on macOS or Windows.**
 
-## 1. Prerequisites (macOS & Linux)
+## 1. Prerequisites (Fedora Linux)
 
-### macOS (Host Machine)
-Ensure you have Homebrew installed on the target machine.
+Suricata is available directly in the default Fedora repositories.
 ```bash
-brew update
-brew install suricata
-```
-
-### Linux (Ubuntu Server 22.04 / 24.04)
-Suricata is maintained in an official PPA by the OISF.
-```bash
-sudo add-apt-repository ppa:oisf/suricata-stable
-sudo apt update
-sudo apt install suricata jq
+sudo dnf install suricata jq
 ```
 
 ## 2. Suricata Configuration (`suricata.yaml`)
 
-- **macOS:** `/opt/homebrew/etc/suricata/suricata.yaml` (Apple Silicon) or `/usr/local/etc/suricata/suricata.yaml` (Intel).
-- **Linux:** `/etc/suricata/suricata.yaml`
+The primary configuration file is located at `/etc/suricata/suricata.yaml`.
 
 You must modify `suricata.yaml` to ensure it outputs its JSON logs directly to the firewall's `core` directory so the Python orchestrator can read them in real-time.
 
@@ -52,16 +41,16 @@ Suricata uses the Emerging Threats (ET) ruleset by default. To download and upda
 ```bash
 sudo suricata-update
 ```
-This will place the consolidated rules file in `/opt/homebrew/var/lib/suricata/rules/suricata.rules`. Ensure your `suricata.yaml` points to this file in the `rule-files:` section.
+This will place the consolidated rules file in `/var/lib/suricata/rules/suricata.rules`. Ensure your `suricata.yaml` points to this file in the `rule-files:` section.
 
 ## 4. Running the Engine
 
-The Python orchestrator (`core/engine.py`) has been rewritten to manage macOS `pf` and tail the `eve.json` file. 
+The Python orchestrator (`core/engine.py`) serves the REST API and the React WebUI. 
 
-To start the packet capture and DPI on the target machine, you will need to start Suricata explicitly targeting the active network interface (e.g., `en0` for Wi-Fi).
+To start the packet capture and DPI on the target machine, you will need to start Suricata explicitly targeting the active network interface (e.g., `eth0`).
 
 ```bash
-sudo suricata -c /opt/homebrew/etc/suricata/suricata.yaml -i en0
+sudo suricata -c /etc/suricata/suricata.yaml -i eth0
 ```
 
 Once Suricata is running and writing to `eve.json`, start your FastAPI backend:
