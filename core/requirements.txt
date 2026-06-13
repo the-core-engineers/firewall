@@ -1,8 +1,12 @@
+# LinuxShield FastAPI dependencies
+# Note: scapy is intentionally REMOVED — packet filtering is now done
+# by XDP/eBPF (via the Rust engine) rather than Python userspace.
+
 fastapi
-uvicorn
-scapy
+uvicorn[standard]
 pydantic
 aiosqlite
 bcrypt
-python-jose
+python-jose[cryptography]
 python-multipart
+httpx           # engine_client.py uses this to call the Rust engine
