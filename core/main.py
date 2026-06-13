@@ -8,8 +8,6 @@ from api.rules import router as rules_router
 from api.blocklist import router as blocklist_router
 from api.settings import router as settings_router
 from api.logs import router as logs_router
-from api.capture import router as capture_router
-from api.tester import router as tester_router
 
 app = FastAPI()
 
@@ -34,5 +32,3 @@ app.include_router(rules_router)
 app.include_router(blocklist_router)
 app.include_router(settings_router)
 app.include_router(logs_router)
-app.include_router(capture_router)
-app.include_router(tester_router)

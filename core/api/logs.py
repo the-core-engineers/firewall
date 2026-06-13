@@ -19,3 +19,5 @@ async def delete_logs(user: str = Depends(get_current_user)):
         await db.execute("DELETE FROM logs")
         await db.commit()
     return {"message": "Logs deleted"}
+
+# refactor this module to consume XDP/eBPF in next stage
