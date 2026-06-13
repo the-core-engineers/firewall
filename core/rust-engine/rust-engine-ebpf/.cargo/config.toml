@@ -1,7 +1,7 @@
 [build]
-target = "bpfel-unknown-none"
+target = "ebpfel-unknown-none"
 
-[target.bpfel-unknown-none]
+[target.ebpfel-unknown-none]
 linker = "bpf-linker"
 
 [unstable]

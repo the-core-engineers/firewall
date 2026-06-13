@@ -4,7 +4,7 @@ use aya::{
     programs::{Xdp, XdpFlags},
     Bpf,
 };
-use aya_log::BpfLogger;
+use aya_log::EbpfLogger;
 use linemux::MuxedLines;
 use log::{info, warn, error};
 use rusqlite::Connection;
@@ -15,12 +15,12 @@ use tokio::{sync::Mutex, time, net::UdpSocket};
 async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
     
-    // In production, the eBPF code must be compiled for bpfel-unknown-none target first.
-    let bpf_path = "../rust-engine-ebpf/target/bpfel-unknown-none/release/rust-engine-ebpf";
+    // In production, the eBPF code must be compiled for ebpfel-unknown-none target first.
+    let bpf_path = "../rust-engine-ebpf/target/ebpfel-unknown-none/release/rust-engine-ebpf";
     let bpf_data = match std::fs::read(bpf_path) {
         Ok(data) => data,
         Err(_) => {
-            warn!("eBPF binary not found. Please compile rust-engine-ebpf first for 'bpfel-unknown-none'.");
+            warn!("eBPF binary not found. Please compile rust-engine-ebpf first for 'ebpfel-unknown-none'.");
             warn!("Running userspace daemon without active XDP enforcement...");
             vec![]
         }
@@ -28,7 +28,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let bpf_instance = if !bpf_data.is_empty() {
         let mut b = Bpf::load(&bpf_data)?;
-        if let Err(e) = BpfLogger::init(&mut b) {
+        if let Err(e) = EbpfLogger::init(&mut b) {
             warn!("failed to initialize eBPF logger: {}", e);
         }
         

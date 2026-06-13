@@ -27,7 +27,7 @@ cd core/rust-engine
 
 # Compile the XDP kernel program first
 cd rust-engine-ebpf
-cargo +nightly build --target bpfel-unknown-none -Z build-std=core --release
+cargo +nightly build --target ebpfel-unknown-none -Z build-std=core --release
 
 # Compile the userspace daemon
 cd ../rust-engine
