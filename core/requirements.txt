@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-scapy
 pydantic
 aiosqlite
 bcrypt

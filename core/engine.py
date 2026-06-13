@@ -1,21 +1,29 @@
 import time
 import uuid
 import threading
+import subprocess
+import os
+import json
+import socket
 from datetime import datetime
-from scapy.all import sniff, IP, TCP, UDP, ICMP
 from database import get_db_data, add_to_blocklist_sync, log_packet
+
+RUST_IPC_PORT = 9999
+
+def trigger_rust_sync():
+    """Sends a UDP packet to the Rust Daemon to trigger an instant XDP/nftables update."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(b"SYNC", ("127.0.0.1", RUST_IPC_PORT))
+        sock.close()
+    except Exception as e:
+        print(f"Failed to trigger Rust IPC: {e}")
 
 captured_packets = []
 is_capturing = False
-capture_thread = None
+suricata_thread = None
+pf_thread = None
 
-# In-memory rate limiting and flood detection
-packet_counts_per_ip = {} # IP -> count per minute
-flood_counts_per_ip = {}  # IP -> count per second
-last_minute_reset = time.time()
-last_second_reset = time.time()
-
-# Statistics Counters
 total_analyzed = 0
 total_allowed = 0
 total_dropped = 0
@@ -26,205 +34,103 @@ current_second = int(time.time())
 current_inbound = 0
 current_outbound = 0
 
-# A simple heuristic for local network (can be expanded)
-def is_local_ip(ip):
-    return ip.startswith('192.168.') or ip.startswith('10.') or ip.startswith('172.16.') or ip.startswith('127.')
+last_pf_hash = ""
 
-def port_matches(rule_port: str, packet_port) -> bool:
-    """
-    Check whether a packet port satisfies a rule port specification.
+# Paths for Suricata integration
+EVE_JSON_PATH = os.path.join(os.path.dirname(__file__), "eve.json")
+PF_CONF_PATH = os.path.join(os.path.dirname(__file__), "pf_custom.conf")
 
-    Supported rule_port formats (all stored as plain TEXT in the DB):
-      - Single port  : '80'
-      - Range        : '49152-65535'   (low-high, inclusive)
-      - Comma list   : '80,443,8080'   (exact values)
+import sys
 
-    packet_port can be an int or a string; None/empty always returns False.
-    A None/empty rule_port means "any port" — callers skip this check entirely.
-    """
-    if not rule_port:
-        return True                          # no restriction → always matches
-    if packet_port is None or packet_port == '':
-        return False                         # rule wants a port, packet has none
+# Ensure iptables chains exist on Linux
+if sys.platform == "linux":
+    subprocess.run(["sudo", "iptables", "-N", "SURICATA_BLOCKS"], capture_output=True)
+    subprocess.run(["sudo", "iptables", "-I", "INPUT", "1", "-j", "SURICATA_BLOCKS"], capture_output=True)
+    subprocess.run(["sudo", "iptables", "-I", "FORWARD", "1", "-j", "SURICATA_BLOCKS"], capture_output=True)
 
-    try:
-        pkt = int(packet_port)
-    except (ValueError, TypeError):
-        return False                         # unparseable packet port → no match
-
-    rule_port = rule_port.strip()
-
-    # Range: "49152-65535"
-    if '-' in rule_port:
-        parts = rule_port.split('-', 1)
-        try:
-            low, high = int(parts[0]), int(parts[1])
-            return low <= pkt <= high
-        except ValueError:
-            return False
-
-    # Comma list: "80,443,8080"
-    if ',' in rule_port:
-        try:
-            return pkt in {int(p.strip()) for p in rule_port.split(',')}
-        except ValueError:
-            return False
-
-    # Single port: "80"
-    try:
-        return pkt == int(rule_port)
-    except ValueError:
-        return False
-
-def evaluate_packet(packet_info, rules, settings, blocklist):
-    global packet_counts_per_ip, flood_counts_per_ip, last_minute_reset, last_second_reset
-    src_ip = packet_info.get('srcIp')
+def tail_eve_json():
+    """Reads Suricata's eve.json to populate the React UI dashboard. 
+    NOTE: Actual hardware blocking is now handled by the high-speed Rust XDP daemon!"""
+    global captured_packets, total_analyzed, total_blocked, total_allowed
+    global current_second, current_inbound, current_outbound, traffic_history
     
-    if src_ip in blocklist:
-        return 'BLOCK', f"IP {src_ip} is in the Blocklist", None
-
-    current_time = time.time()
-    
-    if current_time - last_minute_reset >= 60:
-        packet_counts_per_ip = {}
-        last_minute_reset = current_time
-    
-    if current_time - last_second_reset >= 1:
-        flood_counts_per_ip = {}
-        last_second_reset = current_time
-
-    flood_threshold = int(settings.get('flood_threshold', '100'))
-    flood_counts_per_ip[src_ip] = flood_counts_per_ip.get(src_ip, 0) + 1
-    if flood_counts_per_ip[src_ip] > flood_threshold:
-        add_to_blocklist_sync(src_ip, f"Auto-blocked: Exceeded flood threshold ({flood_threshold} pkts/sec)")
-        return 'DROP', f"Flood detected from {src_ip}", None
-
-    rate_limit = int(settings.get('rate_limit', '1000'))
-    packet_counts_per_ip[src_ip] = packet_counts_per_ip.get(src_ip, 0) + 1
-    if packet_counts_per_ip[src_ip] > rate_limit:
-        return 'DROP', f"Rate limit exceeded for {src_ip}", None
-
-    for rule in rules:
-        match = True
-        if rule['protocol'] != 'ALL' and rule['protocol'] != packet_info.get('protocol'):
-            match = False
-        if rule['srcIp'] and rule['srcIp'] != src_ip:
-            match = False
-        if rule['dstIp'] and rule['dstIp'] != packet_info.get('dstIp'):
-            match = False
-        if rule['srcPort'] and not port_matches(rule['srcPort'], packet_info.get('srcPort')):
-            match = False
-        if rule['dstPort'] and not port_matches(rule['dstPort'], packet_info.get('dstPort')):
-            match = False
+    while not os.path.exists(EVE_JSON_PATH):
+        time.sleep(1)
+        
+    with open(EVE_JSON_PATH, "r") as f:
+        f.seek(0, 2)
+        while is_capturing:
+            line = f.readline()
+            if not line:
+                time.sleep(0.1)
+                continue
             
-        if match:
-            reason = rule['description'] if rule['description'] else f"Matched rule {rule['id']}"
-            return rule['action'], reason, rule
-            
-    default_policy = settings.get('default_policy', 'ALLOW').upper()
-    
-    if default_policy == 'DROP':
-        return 'DROP', "Default drop policy ", None
-    else:
-        return 'ALLOW', "Default allow policy ", None
+            try:
+                event = json.loads(line)
+                now_sec = int(time.time())
+                
+                if now_sec != current_second:
+                    traffic_history.append({'group': 'Inbound', 'date': datetime.fromtimestamp(current_second).isoformat() + "Z", 'value': current_inbound})
+                    traffic_history.append({'group': 'Outbound', 'date': datetime.fromtimestamp(current_second).isoformat() + "Z", 'value': current_outbound})
+                    if len(traffic_history) > 120: traffic_history = traffic_history[-120:]
+                    current_second = now_sec
+                    current_inbound = 0
+                    current_outbound = 0
 
-def packet_callback(packet):
-    global captured_packets
-    global total_analyzed, total_allowed, total_dropped, total_blocked
-    global traffic_history, current_second, current_inbound, current_outbound
-    
-    now_sec = int(time.time())
-    if now_sec != current_second:
-        traffic_history.append({
-            'group': 'Inbound',
-            'date': datetime.fromtimestamp(current_second).isoformat() + "Z",
-            'value': current_inbound
-        })
-        traffic_history.append({
-            'group': 'Outbound',
-            'date': datetime.fromtimestamp(current_second).isoformat() + "Z",
-            'value': current_outbound
-        })
-        # Keep last 60 seconds (2 entries per second -> 120 items max)
-        if len(traffic_history) > 120:
-            traffic_history = traffic_history[-120:]
-        
-        current_second = now_sec
-        current_inbound = 0
-        current_outbound = 0
+                event_type = event.get("event_type")
+                
+                if event_type == "flow":
+                    flow = event.get("flow", {})
+                    bytes_in = flow.get("bytes_toserver", 0)
+                    bytes_out = flow.get("bytes_toclient", 0)
+                    current_inbound += bytes_in
+                    current_outbound += bytes_out
+                    
+                    pkt = {
+                        'id': str(uuid.uuid4())[:8],
+                        'time': event.get("timestamp", "").replace("T", " ")[:19],
+                        'protocol': event.get("proto", "TCP"),
+                        'src': f"{event.get('src_ip')}:{event.get('src_port')}",
+                        'dst': f"{event.get('dest_ip')}:{event.get('dest_port')}",
+                        'status': 'ALLOW',
+                        'reason': 'Suricata Flow',
+                        'dpi': 'Yes'
+                    }
+                    captured_packets.insert(0, pkt)
+                    if len(captured_packets) > 100: captured_packets.pop()
+                    total_analyzed += 1
+                    total_allowed += 1
 
-    if IP in packet:
-        packet_len = len(packet)
-        src_ip = packet[IP].src
-        dst_ip = packet[IP].dst
-        
-        if is_local_ip(dst_ip) and not is_local_ip(src_ip):
-            current_inbound += packet_len
-        elif is_local_ip(src_ip) and not is_local_ip(dst_ip):
-            current_outbound += packet_len
-        else:
-            # Fallback if both local or both public
-            current_inbound += packet_len
-            
-        packet_info = {
-            'id': str(uuid.uuid4())[:8],
-            'time': datetime.fromtimestamp(float(packet.time)).strftime("%Y-%m-%d %H:%M:%S"),
-            'srcIp': src_ip,
-            'dstIp': dst_ip,
-            'protocol': 'OTHER',
-            'srcPort': '',
-            'dstPort': ''
-        }
-        
-        if TCP in packet:
-            packet_info['protocol'] = 'TCP'
-            packet_info['srcPort'] = packet[TCP].sport
-            packet_info['dstPort'] = packet[TCP].dport
-        elif UDP in packet:
-            packet_info['protocol'] = 'UDP'
-            packet_info['srcPort'] = packet[UDP].sport
-            packet_info['dstPort'] = packet[UDP].dport
-        elif ICMP in packet:
-            packet_info['protocol'] = 'ICMP'
-
-        rules, settings, blocklist = get_db_data()
-        action, reason, rule = evaluate_packet(packet_info, rules, settings, blocklist)
-
-        # Update Counters
-        total_analyzed += 1
-        if action == 'ALLOW':
-            total_allowed += 1
-        elif action == 'DROP':
-            total_dropped += 1
-        elif action == 'BLOCK':
-            total_blocked += 1
-
-        log_packet(packet_info, action, reason)
-        
-        captured_packets.insert(0, {
-            'id': packet_info['id'],
-            'time': packet_info['time'],
-            'protocol': packet_info['protocol'],
-            'src': f"{packet_info['srcIp']}:{packet_info['srcPort']}" if packet_info['srcPort'] else packet_info['srcIp'],
-            'dst': f"{packet_info['dstIp']}:{packet_info['dstPort']}" if packet_info['dstPort'] else packet_info['dstIp'],
-            'status': action,
-            'reason': reason
-        })
-        
-        if len(captured_packets) > 50:
-            captured_packets.pop()
-
-def start_sniffing():
-    global is_capturing
-    while is_capturing:
-        sniff(prn=packet_callback, store=False, count=10, timeout=1)
+                elif event_type == "alert":
+                    # The actual hardware packet dropping is handled instantly by the Rust XDP Daemon.
+                    # We log it here for the UI stats and Security Logs table.
+                    rules, settings, blocklist = get_db_data()
+                    ips_mode = settings.get("ai_action_mode", "IDS") == "IPS"
+                    severity = event.get("alert", {}).get("severity", 3)
+                    
+                    if ips_mode and severity <= 2:
+                        total_blocked += 1
+                        
+                        # Save to Security Logs Database
+                        log_packet({
+                            'id': str(uuid.uuid4())[:8],
+                            'time': event.get("timestamp", "").replace("T", " ")[:19],
+                            'protocol': event.get("proto", "TCP"),
+                            'srcIp': event.get("src_ip", ""),
+                            'dstIp': event.get("dest_ip", ""),
+                            'srcPort': str(event.get("src_port", "")),
+                            'dstPort': str(event.get("dest_port", ""))
+                        }, 'BLOCK', f"Suricata IPS: {event.get('alert', {}).get('signature', 'Malicious Traffic')}")
+                pass
+            except Exception as e:
+                print(f"Error parsing eve.json line: {e}")
 
 def toggle_capture(should_capture: bool):
-    global is_capturing, capture_thread
+    global is_capturing, suricata_thread
     if should_capture and not is_capturing:
         is_capturing = True
-        capture_thread = threading.Thread(target=start_sniffing, daemon=True)
-        capture_thread.start()
+        suricata_thread = threading.Thread(target=tail_eve_json, daemon=True)
+        suricata_thread.start()
     elif not should_capture and is_capturing:
         is_capturing = False
 
@@ -249,3 +155,36 @@ def get_stats():
 def clear_packets():
     global captured_packets
     captured_packets.clear()
+
+def _kill_flow_aggregator():
+    """Mock cleanup for FastAPI shutdown to prevent crashes, since Go aggregator is gone."""
+    pass
+
+# Keep evaluate_packet intact for the "Packet Tester" UI feature
+def evaluate_packet(packet_info, rules, settings, blocklist):
+    src_ip = packet_info.get('srcIp')
+    if src_ip in blocklist:
+        return 'BLOCK', f"IP {src_ip} is in the Blocklist", None
+
+    for rule in rules:
+        match = True
+        if rule['protocol'] != 'ALL' and rule['protocol'] != packet_info.get('protocol'):
+            match = False
+        if rule['srcIp'] and rule['srcIp'] != src_ip:
+            match = False
+        if rule['dstIp'] and rule['dstIp'] != packet_info.get('dstIp'):
+            match = False
+        if rule['srcPort'] and packet_info.get('srcPort') != rule['srcPort']: # Simplified port matching
+            match = False
+        if rule['dstPort'] and packet_info.get('dstPort') != rule['dstPort']:
+            match = False
+            
+        if match:
+            reason = rule['description'] if rule['description'] else f"Matched rule {rule['id']}"
+            return rule['action'], reason, rule
+            
+    default_policy = settings.get('default_policy', 'ALLOW').upper()
+    if default_policy == 'DROP':
+        return 'DROP', "Default drop policy ", None
+    else:
+        return 'ALLOW', "Default allow policy ", None

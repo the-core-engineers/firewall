@@ -1,9 +1,10 @@
-# WebUI Frontend — Developer Documentation
+# webUI
 
-**Branch:** `beta-testing`  
 **Location:** `webui/`  
 **Stack:** React 18 · Vite 5 · IBM Carbon Design System · JavaScript (ESM)  
 **Last updated:** 2026-06-09
+
+**Author:** `Bikesh`
 
 ---
 
