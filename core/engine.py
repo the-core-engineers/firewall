@@ -103,7 +103,7 @@ def tail_eve_json():
 
                 elif event_type == "alert":
                     # The actual hardware packet dropping is handled instantly by the Rust XDP Daemon.
-                    # We only log it here for the UI stats if IPS mode is on.
+                    # We log it here for the UI stats and Security Logs table.
                     rules, settings, blocklist = get_db_data()
                     ips_mode = settings.get("ai_action_mode", "IDS") == "IPS"
                     severity = event.get("alert", {}).get("severity", 3)
@@ -111,7 +111,16 @@ def tail_eve_json():
                     if ips_mode and severity <= 2:
                         total_blocked += 1
                         
-            except json.JSONDecodeError:
+                        # Save to Security Logs Database
+                        log_packet({
+                            'id': str(uuid.uuid4())[:8],
+                            'time': event.get("timestamp", "").replace("T", " ")[:19],
+                            'protocol': event.get("proto", "TCP"),
+                            'srcIp': event.get("src_ip", ""),
+                            'dstIp': event.get("dest_ip", ""),
+                            'srcPort': str(event.get("src_port", "")),
+                            'dstPort': str(event.get("dest_port", ""))
+                        }, 'BLOCK', f"Suricata IPS: {event.get('alert', {}).get('signature', 'Malicious Traffic')}")
                 pass
             except Exception as e:
                 print(f"Error parsing eve.json line: {e}")

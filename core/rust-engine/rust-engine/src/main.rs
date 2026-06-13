@@ -129,10 +129,10 @@ async fn sync_nftables() -> Result<(), anyhow::Error> {
         Ok((
             row.get::<_, String>(0)?, // action
             row.get::<_, String>(1)?, // protocol
-            row.get::<_, String>(2)?, // srcIp
-            row.get::<_, String>(3)?, // dstIp
-            row.get::<_, String>(4)?, // srcPort
-            row.get::<_, String>(5)?, // dstPort
+            row.get::<_, Option<String>>(2)?, // srcIp
+            row.get::<_, Option<String>>(3)?, // dstIp
+            row.get::<_, Option<String>>(4)?, // srcPort
+            row.get::<_, Option<String>>(5)?, // dstPort
         ))
     })?;
 
@@ -145,16 +145,13 @@ async fn sync_nftables() -> Result<(), anyhow::Error> {
     nft_config.push_str("        type filter hook input priority 0; policy accept;\n");
 
     for rule_res in rule_iter {
-        if let Ok((action, protocol, src_ip, dst_ip, src_port, dst_port)) = rule_res {
+        if let Ok((action, protocol, src_ip_opt, dst_ip_opt, src_port_opt, dst_port_opt)) = rule_res {
+            let src_ip = src_ip_opt.unwrap_or_default();
+            let dst_ip = dst_ip_opt.unwrap_or_default();
+            let src_port = src_port_opt.unwrap_or_default();
+            let dst_port = dst_port_opt.unwrap_or_default();
+            
             let mut rule_line = String::from("        ");
-
-            let proto_str = if protocol == "TCP" {
-                "tcp"
-            } else if protocol == "UDP" {
-                "udp"
-            } else {
-                "ip protocol"
-            };
 
             // Add IP matches
             if !src_ip.is_empty() {
@@ -164,24 +161,37 @@ async fn sync_nftables() -> Result<(), anyhow::Error> {
                 rule_line.push_str(&format!("ip daddr {} ", dst_ip));
             }
 
-            // Add Port matches (only valid if TCP or UDP)
+            // Protocol and Port logic
+            let mut has_port = false;
             if protocol == "TCP" || protocol == "UDP" {
+                let proto_prefix = if protocol == "TCP" { "tcp" } else { "udp" };
                 if !src_port.is_empty() {
-                    rule_line.push_str(&format!("{} sport {} ", proto_str, src_port));
+                    rule_line.push_str(&format!("{} sport {} ", proto_prefix, src_port));
+                    has_port = true;
                 }
                 if !dst_port.is_empty() {
-                    rule_line.push_str(&format!("{} dport {} ", proto_str, dst_port));
+                    rule_line.push_str(&format!("{} dport {} ", proto_prefix, dst_port));
+                    has_port = true;
                 }
-            } else if protocol != "ALL" {
-                // E.g. ICMP
-                if protocol == "ICMP" {
-                    rule_line.push_str("icmp ");
+                if !has_port {
+                    // No ports specified, just match the protocol entirely
+                    rule_line.push_str(&format!("meta l4proto {} ", proto_prefix));
+                }
+            } else if protocol == "ICMP" {
+                rule_line.push_str("meta l4proto icmp ");
+            } else if protocol == "ANY" || protocol == "ALL" {
+                // If they specify ports but ANY protocol, use 'th' (transport header)
+                if !src_port.is_empty() {
+                    rule_line.push_str(&format!("th sport {} ", src_port));
+                }
+                if !dst_port.is_empty() {
+                    rule_line.push_str(&format!("th dport {} ", dst_port));
                 }
             }
 
             let action_str = if action == "DROP" {
                 "drop"
-            } else if action == "REJECT" {
+            } else if action == "REJECT" || action == "DENY" {
                 "reject"
             } else {
                 "accept"
