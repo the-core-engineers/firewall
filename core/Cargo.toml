@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/xdp-firewall",
+    "crates/engine",
+]
+resolver = "2"
+
+# Shared profile: the eBPF crate needs its own target, so we configure
+# the workspace with release defaults and let each crate override.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
