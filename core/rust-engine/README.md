@@ -4,12 +4,12 @@ This directory contains the high-performance Rust orchestrator that interfaces n
 
 ## Architecture
 - **Control Plane (Python FastAPI)**: Handles the React WebUI, authentication, and writes rules/blocklists to the SQLite database (`firewall.db`).
-- **Data Plane (Rust Daemon)**: Runs completely asynchronously in the background. It polls `firewall.db` and tails Suricata's `eve.json`. 
+- **Data Plane (Rust Daemon)**: Runs asynchronously. Listens for instant UDP IPC signals from FastAPI on `127.0.0.1:9999` and tails Suricata's `eve.json`. When triggered, it syncs blocklist IPs into the XDP eBPF map and generates nftables rulesets from the database.
 - **eBPF Kernel (Aya)**: The Rust daemon injects an XDP program into your NIC driver. When the Rust daemon detects an attacker (either via UI blocklist or a high-severity Suricata alert), it instantly writes the attacker's IP to the shared eBPF `BLOCKLIST` Map. The NIC hardware drops the packet before it even touches the Linux kernel stack.
 
-## Compilation & Deployment (Linux Only)
+## Compilation & Deployment (Fedora Linux Only)
 
-> **Note:** eBPF compilation requires Rust Nightly and the `bpf-linker`. You must perform these steps on your deployment Linux VM, not macOS.
+> **Note:** eBPF compilation requires Rust Nightly and the `bpf-linker`. You must perform these steps on your deployment Fedora Linux machine, not macOS.
 
 ### 1. Install Rust Prerequisites
 ```bash
@@ -37,4 +37,4 @@ Because the orchestrator must manipulate kernel eBPF maps and attach to the NIC,
 sudo RUST_LOG=info ./target/release/rust-engine
 ```
 
-The orchestrator will now run in the background, listening for WebUI updates and Suricata alerts, continuously updating the XDP maps at zero-latency!
+The orchestrator will now run in the background, listening for UDP IPC sync signals from the Python FastAPI Control Plane and Suricata alerts, instantly updating the XDP maps and nftables rulesets!

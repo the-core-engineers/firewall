@@ -1,100 +1,309 @@
 # Comprehensive Testing Guide: Enterprise Hybrid Firewall
 
-This manual will guide you through setting up, running, and completely testing the hybrid architecture (Python FastAPI Control Plane + Rust XDP/nftables Data Plane) on your target Linux machine.
+This manual provides a complete, step-by-step guide to deploy, run, and test the entire hybrid firewall system on a **Fedora Linux** machine. Follow every section in order.
 
-## Prerequisites
-
-1. **Linux Virtual Machine / Bare Metal:** This system relies on native Linux kernel features (eBPF, XDP, and nftables). It **cannot** be run natively on macOS. 
-2. **Root Access:** eBPF map manipulation and `nftables` require `sudo` privileges.
-3. **Suricata:** Must be installed to provide Deep Packet Inspection (IPS) and to drive the Live Capture UI.
+> **Important:** This system relies on native Linux kernel features (eBPF, XDP, nftables) and **cannot** run on macOS or Windows.
 
 ---
 
-## Part 1: Compilation & Setup
+## Part 1: System Prerequisites
 
-### 1. Install Rust & eBPF Toolchain
-On your Linux machine, install the Nightly Rust compiler and the eBPF linker:
+### 1.1 Install System Packages
+```bash
+# Development tools (needed for Rust compilation)
+sudo dnf groupinstall "Development Tools"
+sudo dnf install clang llvm elfutils-libelf-devel zlib-devel
+
+# Suricata IPS
+sudo dnf install suricata jq
+
+# Python
+sudo dnf install python3 python3-pip
+
+# Node.js (for the React WebUI)
+sudo dnf install nodejs npm
+
+# nftables (usually pre-installed on Fedora)
+sudo dnf install nftables
+```
+
+### 1.2 Install the Rust Toolchain
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Install the nightly compiler and eBPF linker
 rustup toolchain install nightly --component rust-src
 cargo install bpf-linker
 ```
 
-### 2. Compile the Rust Data Plane
-Navigate to the Rust engine directory and compile both the kernel and userspace programs:
+### 1.3 Verify All Prerequisites
 ```bash
-cd core/rust-engine
-
-# Compile the XDP kernel program first
-cd rust-engine-ebpf
-cargo +nightly build --target ebpfel-unknown-none -Z build-std=core --release
-
-# Compile the userspace daemon
-cd ../rust-engine
-cargo build --release
+rustc --version          # Should show nightly
+python3 --version        # Should show 3.10+
+node --version           # Should show 18+
+suricata --build-info | head -3
+sudo nft --version
 ```
 
 ---
 
-## Part 2: Running the System
+## Part 2: Suricata Setup
 
-You must run both the Python Control Plane (for the React UI) and the Rust Data Plane (for the actual firewalling) simultaneously.
+### 2.1 Configure Suricata Output
+Edit the Suricata configuration file:
+```bash
+sudo nano /etc/suricata/suricata.yaml
+```
 
-### 1. Start the Python Control Plane
-In a terminal, navigate to the `core/` directory and start FastAPI:
+Find the `outputs` section and configure `eve-log` to write to the firewall's `core/` directory:
+```yaml
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /absolute/path/to/FirewallRepo/core/eve.json
+      types:
+        - alert:
+            payload: yes
+            payload-buffer-size: 4kb
+            payload-printable: yes
+            packet: yes
+        - flow
+        - drop
+```
+> **Replace** `/absolute/path/to/FirewallRepo` with the actual path where you cloned the repository.
+
+### 2.2 Configure the Network Interface
+In the same `suricata.yaml`, find the `af-packet` section and set your active network interface:
+```yaml
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+```
+> Run `ip link show` to find your interface name (e.g., `eth0`, `ens33`, `enp0s3`).
+
+### 2.3 Download Threat Signatures
+```bash
+sudo suricata-update
+```
+Verify the rules are installed:
+```bash
+ls /var/lib/suricata/rules/suricata.rules
+```
+
+### 2.4 Validate the Configuration
+```bash
+sudo suricata -T -c /etc/suricata/suricata.yaml
+```
+This performs a dry-run. If it prints `Configuration provided was successfully loaded`, Suricata is ready.
+
+---
+
+## Part 3: Compile the Rust Data Plane
+
+### 3.1 Compile the eBPF Kernel Program
+```bash
+cd core/rust-engine/rust-engine-ebpf
+cargo +nightly build --target ebpfel-unknown-none -Z build-std=core --release
+```
+This compiles the XDP program that will be injected into your NIC driver.
+
+### 3.2 Compile the Userspace Daemon
+```bash
+cd ../rust-engine
+cargo build --release
+```
+This compiles the Rust daemon that manages the eBPF maps, nftables rules, and Suricata tailing.
+
+---
+
+## Part 4: Install the Python Control Plane
+
 ```bash
 cd core/
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+pip3 install -r requirements.txt
 ```
-*Your React WebUI will now be accessible, allowing you to log in and configure rules.*
 
-### 2. Start the Rust Data Plane
-In a second terminal, navigate to the compiled Rust daemon and run it as `root`:
+---
+
+## Part 5: Install the React WebUI
+
+```bash
+cd webui/
+npm install
+```
+
+---
+
+## Part 6: Running the System
+
+You need **4 terminals** (or use `tmux`/`screen`) to run all components simultaneously.
+
+### Terminal 1: Start Suricata
+```bash
+sudo suricata -c /etc/suricata/suricata.yaml -i eth0
+```
+> Replace `eth0` with your actual interface name from Part 2.
+
+### Terminal 2: Start the Rust Data Plane
 ```bash
 cd core/rust-engine/rust-engine
 sudo RUST_LOG=info ./target/release/rust-engine
 ```
-*You will see logs confirming the daemon has attached the XDP program to the Network Interface (default `eth0`), and is listening for UDP IPC signals on `127.0.0.1:9999`.*
+You should see:
+```
+INFO  rust_engine > Rust Data Plane orchestrator started. Watching DB and Suricata...
+INFO  rust_engine > Listening for IPC SYNC signals on UDP 127.0.0.1:9999...
+```
+
+### Terminal 3: Start the Python Control Plane (FastAPI)
+```bash
+cd core/
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+You should see:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+### Terminal 4: Start the React WebUI
+```bash
+cd webui/
+npm run dev -- --host 0.0.0.0
+```
+You should see:
+```
+  VITE v5.x.x  ready in Xms
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://<your-ip>:5173/
+```
+
+### Access the WebUI
+Open a browser and navigate to:
+- **From the same machine:** `http://localhost:5173`
+- **From another machine on the network:** `http://<linux-machine-ip>:5173`
+
+**Default login credentials:**
+- Username: `admin`
+- Password: `admin`
 
 ---
 
-## Part 3: Testing the Architecture
+## Part 7: Testing the Architecture
 
 ### Test 1: Live Capture (Suricata)
-**Goal:** Verify the React UI still receives real-time packet data.
-1. Open the React WebUI Dashboard.
-2. Click **Start Capture**.
-3. *Expected Result:* The Python backend begins tailing `/var/log/suricata/eve.json`. You will see the Live Traffic graph populate, and the real-time packet list fill with network flows. **Yes, the Live Capture frontend continues to work perfectly!**
+**Goal:** Verify the React UI receives real-time packet data from Suricata.
+
+1. Log into the WebUI.
+2. Navigate to **Live Capture**.
+3. Click **Start Capture**.
+4. From another terminal, generate some network traffic:
+   ```bash
+   curl https://google.com
+   ping 8.8.8.8 -c 5
+   ```
+5. **Expected Result:** The Live Traffic table populates with flow entries showing protocol, source/destination IPs, and ports.
+
+---
 
 ### Test 2: Instant XDP Hardware Drop (Blocklist)
-**Goal:** Verify the WebUI instantly pushes IP blocklist entries to the Rust eBPF map.
-1. Ping your Linux VM from a secondary device (e.g., your laptop): `ping <linux_vm_ip>` -> *Pings should succeed.*
-2. In the React WebUI, navigate to the **Blocklist** tab.
-3. Add the IP address of your secondary device.
-4. *Expected Result:* 
-   - The Python API instantly fires a UDP `SYNC` packet.
-   - The Rust console logs: `Received IPC SYNC signal from Python! Executing instant hardware sync.`
-   - Your `ping` from the secondary device instantly stops receiving replies.
+**Goal:** Verify the WebUI instantly pushes IP blocklist entries to the XDP eBPF map.
+
+1. From a second machine on the same network, ping the Linux firewall:
+   ```bash
+   ping <linux-firewall-ip>
+   ```
+   → Pings should succeed.
+2. In the WebUI, navigate to **Blocklist**.
+3. Add the IP address of the second machine. Set Reason to `Test block`.
+4. **Expected Result:**
+   - In **Terminal 2** (Rust), you see:
+     ```
+     INFO  rust_engine > Received IPC SYNC signal from Python! Executing instant hardware sync.
+     ```
+   - The `ping` from the second machine **instantly stops receiving replies**.
    - The packet is dropped at the NIC driver layer (XDP), consuming 0 CPU.
+5. **Cleanup:** Remove the IP from the Blocklist in the WebUI.
+
+---
 
 ### Test 3: Complex NFTables Routing (Rules)
-**Goal:** Verify the WebUI pushes complex stateful routing rules to `nftables`.
-1. In the React WebUI, navigate to the **Rules** tab.
-2. Add a new rule: `Action: DROP`, `Protocol: TCP`, `Dest Port: 8000`.
-3. *Expected Result:*
-   - The Python API fires the UDP `SYNC` packet.
-   - The Rust daemon queries the SQLite database, generates an optimized `nftables` script, and executes it.
-   - Run `sudo nft list ruleset` in your Linux terminal. You will see the `custom_rules` chain dynamically populated with `tcp dport 8000 drop`.
-   - Any HTTP traffic attempting to reach port 8000 is now dropped by the kernel Netfilter stack.
+**Goal:** Verify the WebUI pushes complex stateful routing rules to nftables.
+
+1. In the WebUI, navigate to **Firewall Rules**.
+2. Add a new rule:
+   - Action: `DROP`
+   - Protocol: `TCP`
+   - Dest Port: `8080`
+   - Description: `Test TCP drop`
+3. **Expected Result:**
+   - In **Terminal 2** (Rust), you see the IPC sync log.
+   - Verify in a new terminal:
+     ```bash
+     sudo nft list ruleset
+     ```
+     You should see the `custom_rules` chain containing `tcp dport 8080 drop`.
+4. **Cleanup:** Delete the test rule from the WebUI.
+
+---
 
 ### Test 4: Suricata Auto-IPS Mitigation
-**Goal:** Verify Suricata alerts automatically trigger XDP drops via Rust.
-1. Ensure the React UI Settings have **"IPS Mode"** enabled.
-2. Use an attacker machine to send a known malicious payload to the Linux VM (e.g., an Nmap aggressive scan, or an exploit payload).
-3. *Expected Result:*
+**Goal:** Verify Suricata alerts automatically trigger XDP drops via the Rust daemon.
+
+1. Ensure Suricata is running (Terminal 1).
+2. From an attacker machine, run a known malicious signature scan:
+   ```bash
+   # Nmap aggressive scan (triggers multiple Suricata signatures)
+   sudo nmap -A -T4 <linux-firewall-ip>
+   ```
+3. **Expected Result:**
    - Suricata detects the signature and writes a Severity 1 or 2 alert to `eve.json`.
-   - The Rust daemon (which is tailing `eve.json`) detects the alert.
-   - The Rust daemon instantly injects the attacker's IP directly into the XDP eBPF map.
-   - The Rust console logs: `Suricata Alert! Fast-path hardware drop for IP: <attacker_ip>`.
+   - In **Terminal 2** (Rust), you see:
+     ```
+     INFO  rust_engine > Suricata Alert! Fast-path hardware drop for IP: <attacker-ip>
+     ```
    - The attacker is instantly locked out at the hardware layer.
+
+---
+
+### Test 5: Packet Tester (Simulated)
+**Goal:** Verify the Packet Tester evaluates rules correctly without touching the network.
+
+1. In the WebUI, navigate to **Packet Tester**.
+2. Fill in the form:
+   - Protocol: `TCP`
+   - Source IP: `192.168.1.100`
+   - Dest IP: `8.8.8.8`
+   - Dest Port: `443`
+3. Click **Test Packet**.
+4. **Expected Result:** The result tile shows `ALLOWED` with the reason matching an `Allow HTTPS` rule (or your default policy).
+
+---
+
+### Test 6: Dashboard Statistics
+**Goal:** Verify that the Dashboard displays real-time packet counters.
+
+1. Navigate to **Dashboard**.
+2. Start a Live Capture from the **Live Capture** page.
+3. Generate traffic from another terminal:
+   ```bash
+   for i in $(seq 1 50); do curl -s http://google.com > /dev/null; done
+   ```
+4. **Expected Result:** The Dashboard tiles update in real time showing increasing counters for Total Analyzed, Packets Allowed, Packets Dropped, and Packets Blocked.
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `eBPF binary not found` in Rust logs | You forgot to compile the eBPF kernel program first (Part 3, Step 1) |
+| `failed to attach the XDP program to interface eth0` | Your interface name is different. Check with `ip link show` and update the `iface` variable in `main.rs` |
+| `Failed to bind UDP IPC port` | Another instance of the Rust daemon is already running. Kill it with `sudo pkill rust-engine` |
+| Suricata won't start | Run `sudo suricata -T -c /etc/suricata/suricata.yaml` to validate the config |
+| WebUI can't connect to API | Ensure FastAPI is running on port 8000 and that no firewall is blocking it. Check `webui/src/context/AuthContext.jsx` for the API URL |
+| `nftables update failed` in Rust logs | Ensure `nftables` service is running: `sudo systemctl start nftables` |
+| WebUI shows blank page | Run `npm install` in the `webui/` directory first |

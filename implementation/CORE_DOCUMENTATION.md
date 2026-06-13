@@ -2,8 +2,8 @@
 
 **Branch:** `beta-testing`  
 **Location:** `core/`  
-**Stack:** Python 3 · FastAPI · Scapy · SQLite (aiosqlite) · JWT  
-**Last updated:** 2026-06-09
+**Stack:** Python 3 · FastAPI · SQLite (aiosqlite) · JWT · Suricata · Rust/eBPF/XDP (Data Plane)  
+**Last updated:** 2026-06-13
 
 ---
 
@@ -18,31 +18,34 @@
    - 4.3 [Default Seed Rules](#43-default-seed-rules)
 5. [Data Models — `models.py`](#5-data-models--modelspy)
 6. [Authentication — `login.py`](#6-authentication--loginpy)
-7. [Packet Engine — `engine.py`](#7-packet-engine--enginepy)
+7. [Control Plane Engine — `engine.py`](#7-control-plane-engine--enginepy)
    - 7.1 [Port Matching](#71-port-matching)
-   - 7.2 [Packet Evaluation Pipeline](#72-packet-evaluation-pipeline)
-   - 7.3 [Live Capture & Threading](#73-live-capture--threading)
+   - 7.2 [IPC Sync Trigger](#72-ipc-sync-trigger)
+   - 7.3 [Live Capture (Suricata)](#73-live-capture-suricata)
    - 7.4 [Statistics & Traffic History](#74-statistics--traffic-history)
-8. [REST API Routes](#8-rest-api-routes)
-   - 8.1 [Authentication](#81-authentication)
-   - 8.2 [Rules — `/rules`](#82-rules----rules)
-   - 8.3 [Blocklist — `/blocklist`](#83-blocklist----blocklist)
-   - 8.4 [Logs — `/logs`](#84-logs----logs)
-   - 8.5 [Capture — `/capture`](#85-capture----capture)
-   - 8.6 [Packet Tester — `/test`](#86-packet-tester----test)
-   - 8.7 [Settings — `/settings`](#87-settings----settings)
-9. [Application Entry Point — `main.py`](#9-application-entry-point--mainpy)
-10. [Known Limitations & TODOs](#10-known-limitations--todos)
+8. [Rust Data Plane — `rust-engine/`](#8-rust-data-plane--rust-engine)
+9. [REST API Routes](#9-rest-api-routes)
+   - 9.1 [Authentication](#91-authentication)
+   - 9.2 [Rules — `/rules`](#92-rules----rules)
+   - 9.3 [Blocklist — `/blocklist`](#93-blocklist----blocklist)
+   - 9.4 [Logs — `/logs`](#94-logs----logs)
+   - 9.5 [Capture — `/capture`](#95-capture----capture)
+   - 9.6 [Packet Tester — `/test`](#96-packet-tester----test)
+   - 9.7 [Settings — `/settings`](#97-settings----settings)
+10. [Application Entry Point — `main.py`](#10-application-entry-point--mainpy)
+11. [Known Limitations & TODOs](#11-known-limitations--todos)
 
 ---
 
 ## 1. Overview
 
-The `core/` package is the backend engine of the firewall. It performs three independent roles simultaneously:
+The `core/` package implements the **Control Plane** of the firewall. It operates as a hybrid system:
 
-- **Network sniffing** — captures live packets from the host interface using Scapy in a background daemon thread.
-- **Rule evaluation** — checks each captured packet against an ordered priority pipeline (blocklist → flood detection → rate limiting → user rules → default policy).
 - **REST API** — exposes all management functions (rules, blocklist, logs, settings, capture control, and a packet simulator) to the Web UI via a FastAPI application.
+- **IPC Bridge** — when rules or blocklist entries are mutated via the API, the Control Plane sends an instant UDP `SYNC` signal to the Rust Data Plane daemon on `127.0.0.1:9999`, triggering hardware-level enforcement.
+- **Live Capture** — tails Suricata's `eve.json` to provide real-time packet visibility in the WebUI.
+
+**Actual packet filtering is NOT performed by Python.** All enforcement is handled by the Rust Data Plane (`core/rust-engine/`), which manages eBPF/XDP maps (for blocklist drops at the NIC) and `nftables` rulesets (for complex stateful rules).
 
 All persistent state lives in a single SQLite file (`core/firewall.db`), which is created automatically on first run.
 
@@ -54,18 +57,25 @@ All persistent state lives in a single SQLite file (`core/firewall.db`), which i
 core/
 ├── main.py               # FastAPI app factory; mounts all routers
 ├── database.py           # SQLite schema, CRUD helpers, async seeder
-├── engine.py             # Scapy sniffing, rule evaluation, statistics
+├── engine.py             # IPC trigger, Suricata live capture, statistics
 ├── login.py              # JWT auth, user table, route /login
 ├── models.py             # Pydantic request/response models
 ├── requirements.txt      # Python dependencies
-└── api/
-    ├── __init__.py
-    ├── rules.py          # GET/POST/DELETE /rules
-    ├── blocklist.py      # GET/POST/DELETE /blocklist
-    ├── logs.py           # GET/DELETE /logs
-    ├── capture.py        # POST /capture/start|stop|clear, GET /capture/status|packets|stats
-    ├── settings.py       # GET/POST /settings
-    └── tester.py         # POST /test
+├── SURICATA_SETUP.md     # Suricata deployment guide (Fedora Linux)
+├── api/
+│   ├── __init__.py
+│   ├── rules.py          # GET/POST/DELETE /rules (triggers Rust IPC sync)
+│   ├── blocklist.py      # GET/POST/DELETE /blocklist (triggers Rust IPC sync)
+│   ├── logs.py           # GET/DELETE /logs
+│   ├── capture.py        # POST /capture/start|stop|clear, GET /capture/status|packets|stats
+│   ├── settings.py       # GET/POST /settings
+│   └── tester.py         # POST /test
+└── rust-engine/          # Rust Data Plane (eBPF/XDP + nftables)
+    ├── Cargo.toml        # Workspace definition
+    ├── README.md         # Compilation & deployment guide
+    ├── rust-engine/      # Userspace daemon (Tokio async, UDP IPC, SQLite sync)
+    ├── rust-engine-ebpf/ # eBPF kernel program (XDP BLOCKLIST map)
+    └── rust-engine-common/ # Shared types between kernel and userspace
 ```
 
 ---
@@ -74,11 +84,13 @@ core/
 
 ### Prerequisites
 
+- **Fedora Linux** (required for eBPF/XDP and nftables)
 - Python 3.10+
-- Root / administrator privileges (required for Scapy raw socket access)
+- Rust Nightly + `bpf-linker` (for compiling the Data Plane)
+- Suricata (for deep packet inspection and live capture)
 - Node.js 18+ (for the Web UI only; not needed for the core alone)
 
-### Install dependencies
+### Install Python dependencies
 
 ```bash
 cd core
@@ -91,24 +103,31 @@ pip install -r requirements.txt
 |---|---|
 | `fastapi` | REST framework |
 | `uvicorn` | ASGI server |
-| `scapy` | Packet capture and parsing |
 | `pydantic` | Request/response validation |
 | `aiosqlite` | Async SQLite driver |
 | `bcrypt` | Password hashing |
 | `python-jose` | JWT encoding/decoding |
 | `python-multipart` | Form data parsing (FastAPI dependency) |
 
-### Start the API server
+### Start the Control Plane (Python API)
 
 ```bash
-# Must be run from inside core/ so DB and import paths resolve correctly
 cd core
-python -m uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 The API listens on `http://localhost:8000` by default. The interactive API explorer is available at `http://localhost:8000/docs`.
 
-> **Note:** On Linux/macOS, Scapy requires root to open raw sockets. Run with `sudo` or grant the Python binary `CAP_NET_RAW`.
+### Start the Data Plane (Rust Daemon)
+
+See `core/rust-engine/README.md` for full compilation instructions. Once compiled:
+
+```bash
+cd core/rust-engine/rust-engine
+sudo RUST_LOG=info ./target/release/rust-engine
+```
+
+> **Note:** Both the Control Plane and Data Plane must be running simultaneously. The Control Plane handles the WebUI and API; the Data Plane handles all kernel-level packet enforcement.
 
 ---
 
@@ -322,7 +341,7 @@ All protected routes use `Depends(get_current_user)`. It decodes the JWT and ret
 
 ---
 
-## 7. Packet Engine — `engine.py`
+## 7. Control Plane Engine — `engine.py`
 
 ### 7.1 Port Matching
 
@@ -344,64 +363,31 @@ port_matches(None,          9999)   # True  (no restriction)
 port_matches('80',          None)   # False (packet has no port)
 ```
 
-### 7.2 Packet Evaluation Pipeline
+### 7.2 IPC Sync Trigger
 
-Every packet passes through the following ordered checks inside `evaluate_packet()`. The first check that fires returns immediately — later checks are not reached.
+When any rule or blocklist mutation occurs via the REST API, the `trigger_rust_sync()` function sends a UDP `SYNC` packet to `127.0.0.1:9999`. The Rust Data Plane daemon receives this signal and instantly:
+1. Reads the `blocklist` table from SQLite and syncs all IPs into the XDP eBPF `BLOCKLIST` HashMap.
+2. Reads the `rules` table from SQLite, generates an optimized `nftables` configuration script, and executes `sudo nft -f` to apply the rules.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. BLOCKLIST CHECK                                         │
-│     src_ip in blocklist?  →  BLOCK immediately              │
-├─────────────────────────────────────────────────────────────┤
-│  2. FLOOD DETECTION  (per-second window, resets every 1s)   │
-│     packets_from_ip > flood_threshold?                      │
-│       →  add_to_blocklist_sync()  →  DROP                   │
-├─────────────────────────────────────────────────────────────┤
-│  3. RATE LIMITING  (per-minute window, resets every 60s)    │
-│     packets_from_ip > rate_limit?  →  DROP                  │
-├─────────────────────────────────────────────────────────────┤
-│  4. RULE EVALUATION  (ordered; first match wins)            │
-│     For each rule in rules[]:                               │
-│       protocol match?                                       │
-│       srcIp match (exact or None)?                          │
-│       dstIp match (exact or None)?                          │
-│       srcPort match (port_matches)?                         │
-│       dstPort match (port_matches)?                         │
-│       All match  →  return rule.action, rule.description    │
-├─────────────────────────────────────────────────────────────┤
-│  5. DEFAULT POLICY                                          │
-│     No rule matched  →  ALLOW  ("Default allow policy")     │
-└─────────────────────────────────────────────────────────────┘
+```python
+def trigger_rust_sync():
+    """Send instant UDP signal to Rust Data Plane daemon."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(b"SYNC", ("127.0.0.1", 9999))
+        sock.close()
+    except Exception as e:
+        print(f"Warning: Could not signal Rust daemon: {e}")
 ```
 
-**Return value:** `(action: str, reason: str, rule: dict | None)`
+This replaces the old Scapy-based packet sniffing and Python-level rule evaluation. **Python no longer performs any packet filtering.**
 
-### 7.3 Live Capture & Threading
+### 7.3 Live Capture (Suricata)
 
-```
-FastAPI event loop (main thread)
-        │
-        │  toggle_capture(True)
-        ▼
-Background daemon thread  ──► start_sniffing()
-                                    │
-                                    └─ while is_capturing:
-                                           sniff(count=10, timeout=1)
-                                                │
-                                                └─ packet_callback(pkt)
-                                                       │
-                                                       ├─ extract IP/TCP/UDP/ICMP fields
-                                                       ├─ get_db_data()  (sync SQLite)
-                                                       ├─ evaluate_packet()
-                                                       ├─ log_packet()   (sync SQLite)
-                                                       └─ append to captured_packets[]
-```
-
-- `captured_packets` is a Python list capped at 50 entries (oldest dropped).
-- `toggle_capture(False)` sets `is_capturing = False`; the sniff loop exits naturally after its current 1-second timeout completes.
-- The thread is a **daemon** thread — it will not prevent interpreter shutdown.
-
-> ⚠ **Thread safety:** `captured_packets` and the counter globals (`total_analyzed`, etc.) are accessed from both the background thread and the FastAPI request handlers without a lock. This is acceptable for single-process development use but should be replaced with `threading.Lock` or a queue before any production deployment.
+Live capture is now powered by **Suricata** deep packet inspection. The Python engine tails Suricata's `eve.json` log file to populate the real-time packet view in the WebUI. When the user clicks "Start Capture":
+1. The engine begins reading new entries from `eve.json`.
+2. Flow and alert events are parsed and converted into the packet format expected by the frontend.
+3. Packets are appended to the `captured_packets` buffer (capped at 50 entries).
 
 ### 7.4 Statistics & Traffic History
 
@@ -415,11 +401,29 @@ The WebUI's `AppContext` further derives a **packets/second delta** by computing
 
 ---
 
-## 8. REST API Routes
+## 8. Rust Data Plane — `rust-engine/`
+
+The Rust Data Plane is the actual enforcement engine. It is a separate binary that runs as a privileged `root` process alongside the Python Control Plane.
+
+### Architecture
+- **eBPF Kernel Program** (`rust-engine-ebpf/`): An XDP program compiled for `ebpfel-unknown-none` using the `aya-ebpf` framework. It maintains a `BLOCKLIST` HashMap. For every packet arriving at the NIC, it checks the source IP against this map. Matches trigger `XDP_DROP` at the driver level.
+- **Userspace Daemon** (`rust-engine/`): An async Tokio daemon that:
+  1. Loads the eBPF program and attaches it to the network interface.
+  2. Listens on `127.0.0.1:9999` (UDP) for `SYNC` signals from Python.
+  3. On each signal, reads `firewall.db` and syncs blocklist IPs into the XDP map and generates/executes `nftables` rulesets.
+  4. Tails Suricata's `eve.json` and auto-injects Severity 1-2 threat IPs into the XDP map.
+
+For compilation and deployment instructions, see `core/rust-engine/README.md`.
+
+---
+
+## 9. REST API Routes
 
 All routes except `POST /login` require a valid `Authorization: Bearer <token>` header.
 
-### 8.1 Authentication
+When a mutation route (POST/DELETE on rules or blocklist) completes, the API calls `trigger_rust_sync()` to signal the Rust Data Plane for instant enforcement.
+
+### 9.1 Authentication
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -427,13 +431,13 @@ All routes except `POST /login` require a valid `Authorization: Bearer <token>` 
 
 ---
 
-### 8.2 Rules — `/rules`
+### 9.2 Rules — `/rules`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/rules` | Yes | List all rules |
-| POST | `/rules` | Yes | Add a new rule |
-| DELETE | `/rules/{rule_id}` | Yes | Delete a rule by ID |
+| POST | `/rules` | Yes | Add a new rule (triggers Rust IPC sync → nftables update) |
+| DELETE | `/rules/{rule_id}` | Yes | Delete a rule by ID (triggers Rust IPC sync → nftables update) |
 
 **`POST /rules` — request body:**
 ```json
@@ -466,13 +470,13 @@ Port fields accept single ports (`"80"`), ranges (`"49152-65535"`), or comma-sep
 
 ---
 
-### 8.3 Blocklist — `/blocklist`
+### 9.3 Blocklist — `/blocklist`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/blocklist` | Yes | List all blocked IPs |
-| POST | `/blocklist` | Yes | Manually block an IP |
-| DELETE | `/blocklist/{entry_id}` | Yes | Remove a block by entry ID |
+| POST | `/blocklist` | Yes | Manually block an IP (triggers Rust IPC sync → XDP map update) |
+| DELETE | `/blocklist/{entry_id}` | Yes | Remove a block by entry ID (triggers Rust IPC sync → XDP map update) |
 
 **`POST /blocklist` — request body:**
 ```json
@@ -483,7 +487,7 @@ Returns HTTP 400 if the IP is already in the blocklist.
 
 ---
 
-### 8.4 Logs — `/logs`
+### 9.4 Logs — `/logs`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -492,12 +496,12 @@ Returns HTTP 400 if the IP is already in the blocklist.
 
 ---
 
-### 8.5 Capture — `/capture`
+### 9.5 Capture — `/capture`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/capture/start` | Yes | Start the Scapy sniffer thread |
-| POST | `/capture/stop` | Yes | Stop the sniffer thread |
+| POST | `/capture/start` | Yes | Start tailing Suricata's eve.json for live capture |
+| POST | `/capture/stop` | Yes | Stop the live capture |
 | POST | `/capture/clear` | Yes | Flush `captured_packets` in memory |
 | GET | `/capture/status` | Yes | `{"status": "working"}` or `{"status": "stopped"}` |
 | GET | `/capture/packets` | Yes | Last 50 captured packets |
@@ -566,7 +570,7 @@ The backend uses `INSERT OR REPLACE` — sending the same key twice overwrites t
 
 ---
 
-## 9. Application Entry Point — `main.py`
+## 10. Application Entry Point — `main.py`
 
 ```python
 app = FastAPI()
@@ -584,8 +588,8 @@ async def startup_event():
 
 # Routers
 app.include_router(login_router)        # /login
-app.include_router(rules_router)        # /rules
-app.include_router(blocklist_router)    # /blocklist
+app.include_router(rules_router)        # /rules (triggers Rust IPC sync)
+app.include_router(blocklist_router)    # /blocklist (triggers Rust IPC sync)
 app.include_router(settings_router)    # /settings
 app.include_router(logs_router)         # /logs
 app.include_router(capture_router)      # /capture/*
@@ -594,17 +598,16 @@ app.include_router(tester_router)       # /test
 
 ---
 
-## 10. Known Limitations & TODOs
+## 11. Known Limitations & TODOs
 
 | # | Area | Issue | Suggested Fix |
 |---|---|---|---|
 | 1 | Security | `SECRET_KEY` is hardcoded in `login.py` | Load from environment variable (`os.getenv`) |
 | 2 | Security | Default credentials are `admin` / `admin` | Force password change on first login |
 | 3 | Security | CORS allows all origins (`"*"`) | Restrict to the WebUI origin in production |
-| 4 | Thread safety | `captured_packets` and stat counters are unsynchronised | Add `threading.Lock` around all shared state |
-| 5 | Scalability | `get_db_data()` is called on **every single packet** | Cache rules/settings in memory; invalidate on API write |
-| 6 | Port matching | No CIDR support for IP fields | Add `ipaddress.ip_network` range matching alongside exact IP |
-| 7 | Persistence | Stats counters reset to zero on every restart | Persist counters in `settings` table or a dedicated `stats` table |
-| 8 | Logging | `log_packet()` opens/closes a new SQLite connection per packet | Use a connection pool or batch-insert logs |
-| 9 | Protocol | `payload` field in `PacketTest` is accepted but never used | Wire it into the engine or remove it |
-| 10 | Audit | No password change endpoint exists | Add `PUT /users/me/password` |
+| 4 | Port matching | No CIDR support for IP fields | Add `ipaddress.ip_network` range matching alongside exact IP |
+| 5 | Persistence | Stats counters reset to zero on every restart | Persist counters in `settings` table or a dedicated `stats` table |
+| 6 | Protocol | `payload` field in `PacketTest` is accepted but never used | Wire it into the engine or remove it |
+| 7 | Audit | No password change endpoint exists | Add `PUT /users/me/password` |
+| 8 | Rust DP | XDP map does not support IPv6 addresses yet | Extend eBPF map to `u128` keys for IPv6 |
+| 9 | Rust DP | nftables sync flushes all rules on every update | Implement incremental rule diffing |

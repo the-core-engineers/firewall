@@ -2,7 +2,7 @@ use anyhow::Context;
 use aya::{
     maps::HashMap,
     programs::{Xdp, XdpFlags},
-    Bpf,
+    Ebpf,
 };
 use aya_log::EbpfLogger;
 use linemux::MuxedLines;
@@ -27,7 +27,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let bpf_instance = if !bpf_data.is_empty() {
-        let mut b = Bpf::load(&bpf_data)?;
+        let mut b = Ebpf::load(&bpf_data)?;
         if let Err(e) = EbpfLogger::init(&mut b) {
             warn!("failed to initialize eBPF logger: {}", e);
         }
@@ -95,7 +95,7 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn sync_sqlite_to_ebpf(bpf_wrapper: &Arc<Mutex<Option<Bpf>>>) -> Result<(), anyhow::Error> {
+async fn sync_sqlite_to_ebpf(bpf_wrapper: &Arc<Mutex<Option<Ebpf>>>) -> Result<(), anyhow::Error> {
     // Navigate back to where firewall.db is located
     let conn = Connection::open("../../firewall.db")?;
     let mut stmt = conn.prepare("SELECT ip FROM blocklist")?;
@@ -212,7 +212,7 @@ async fn sync_nftables() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn tail_suricata(bpf_wrapper: Arc<Mutex<Option<Bpf>>>) -> Result<(), anyhow::Error> {
+async fn tail_suricata(bpf_wrapper: Arc<Mutex<Option<Ebpf>>>) -> Result<(), anyhow::Error> {
     let eve_path = "../../eve.json";
     
     while !std::path::Path::new(eve_path).exists() {

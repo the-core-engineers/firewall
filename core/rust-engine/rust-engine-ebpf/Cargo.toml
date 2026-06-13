@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-ebpf = "0.1.0"
-aya-log-ebpf = "0.1.0"
+aya-ebpf = "0.1.1"
+aya-log-ebpf = "0.1.1"
 rust-engine-common = { path = "../rust-engine-common" }
-network-types = "0.0.4"
+network-types = "0.0.7"
 
 [profile.release]
 panic = "abort"
