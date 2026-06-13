@@ -1,0 +1,23 @@
+[package]
+name = "xdp-firewall"
+version = "0.1.0"
+edition = "2021"
+
+# This crate compiles to BPF bytecode — it MUST target bpfel-unknown-none.
+# Build with: cargo build -p xdp-firewall --target bpfel-unknown-none -Z build-std=core
+[[bin]]
+name = "xdp-firewall"
+path = "src/main.rs"
+
+[dependencies]
+# aya-bpf:  the eBPF-side runtime (runs inside the kernel)
+aya-bpf      = { version = "0.1" }
+aya-log-ebpf = { version = "0.1" }
+# network-types gives us safe Ethernet/IP/TCP/UDP header structs
+network-types = "0.0.7"
+
+[profile.release]
+lto        = true
+opt-level  = 3
+codegen-units = 1
+panic      = "abort"   # required for no_std eBPF
