@@ -4,4 +4,8 @@ members = [
     "rust-engine-ebpf",
     "rust-engine-common",
 ]
+default-members = [
+    "rust-engine",
+    "rust-engine-common",
+]
 resolver = "2"

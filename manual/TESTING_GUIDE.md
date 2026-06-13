@@ -56,23 +56,18 @@ Edit the Suricata configuration file:
 sudo nano /etc/suricata/suricata.yaml
 ```
 
-Find the `outputs` section and configure `eve-log` to write to the firewall's `core/` directory:
+Find the `outputs` → `eve-log` section. The default Suricata 8.x config already has the correct alert settings (`payload: yes`, `metadata: yes`, `packet: yes`, `flow: true`). 
+
+**The only thing you need to change is the `filename`** to point to your firewall's `core/` directory:
+
 ```yaml
-outputs:
   - eve-log:
       enabled: yes
       filetype: regular
-      filename: /absolute/path/to/FirewallRepo/core/eve.json
-      types:
-        - alert:
-            payload: yes
-            payload-buffer-size: 4kb
-            payload-printable: yes
-            packet: yes
-        - flow
-        - drop
+      filename: /home/bikesh/Downloads/firewall-alpha/core/eve.json   # ← Change this path
 ```
-> **Replace** `/absolute/path/to/FirewallRepo` with the actual path where you cloned the repository.
+
+> Leave the rest of the `alert` and `metadata` settings at their defaults — they are already correctly configured for our Rust daemon to parse.
 
 ### 2.2 Configure the Network Interface
 In the same `suricata.yaml`, find the `af-packet` section and set your active network interface:
@@ -107,7 +102,7 @@ This performs a dry-run. If it prints `Configuration provided was successfully l
 ### 3.1 Compile the eBPF Kernel Program
 ```bash
 cd core/rust-engine/rust-engine-ebpf
-cargo +nightly build --target ebpfel-unknown-none -Z build-std=core --release
+cargo +nightly build --target bpfel-unknown-none -Z build-std=core,alloc --release
 ```
 This compiles the XDP program that will be injected into your NIC driver.
 

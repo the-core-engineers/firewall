@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya = "0.13.1"
-aya-log = "0.2.1"
+aya = { git = "https://github.com/aya-rs/aya", branch = "main" }
+aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
 rust-engine-common = { path = "../rust-engine-common" }
 anyhow = "1"
 env_logger = "0.11"

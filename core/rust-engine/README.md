@@ -19,10 +19,10 @@ cargo install bpf-linker
 ```
 
 ### 2. Compile the eBPF Kernel Program
-The kernel code must be specifically compiled for the `ebpfel-unknown-none` target architecture using the unstable `build-std` feature to compile the Rust core library for the kernel.
+The kernel code must be specifically compiled for the `bpfel-unknown-none` target architecture using the unstable `build-std` feature to compile the Rust core library for the kernel.
 ```bash
 cd rust-engine-ebpf
-cargo +nightly build --target ebpfel-unknown-none -Z build-std=core --release
+cargo +nightly build --target bpfel-unknown-none -Z build-std=core,alloc --release
 ```
 
 ### 3. Compile the Userspace Daemon

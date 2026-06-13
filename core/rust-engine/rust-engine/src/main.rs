@@ -15,12 +15,12 @@ use tokio::{sync::Mutex, time, net::UdpSocket};
 async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
     
-    // In production, the eBPF code must be compiled for ebpfel-unknown-none target first.
-    let bpf_path = "../rust-engine-ebpf/target/ebpfel-unknown-none/release/rust-engine-ebpf";
+    // In production, the eBPF code must be compiled for bpfel-unknown-none target first.
+    let bpf_path = "../rust-engine-ebpf/target/bpfel-unknown-none/release/rust-engine-ebpf";
     let bpf_data = match std::fs::read(bpf_path) {
         Ok(data) => data,
         Err(_) => {
-            warn!("eBPF binary not found. Please compile rust-engine-ebpf first for 'ebpfel-unknown-none'.");
+            warn!("eBPF binary not found. Please compile rust-engine-ebpf first for 'bpfel-unknown-none'.");
             warn!("Running userspace daemon without active XDP enforcement...");
             vec![]
         }
@@ -36,9 +36,9 @@ async fn main() -> Result<(), anyhow::Error> {
         let program: &mut Xdp = b.program_mut("rust_engine").unwrap().try_into()?;
         program.load()?;
         
-        // Determine the network interface. Defaulting to eth0 for Linux, but should be configurable.
-        let iface = "eth0"; 
-        program.attach(iface, XdpFlags::default())
+        // Determine the network interface. Defaulting to enp2s0 for Fedora VMs, but allow IFACE env var override.
+        let iface = std::env::var("IFACE").unwrap_or_else(|_| "enp2s0".to_string());
+        program.attach(&iface, XdpFlags::default())
             .context(format!("failed to attach the XDP program to interface {}", iface))?;
         
         Some(b)
@@ -96,10 +96,12 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn sync_sqlite_to_ebpf(bpf_wrapper: &Arc<Mutex<Option<Ebpf>>>) -> Result<(), anyhow::Error> {
-    // Navigate back to where firewall.db is located
-    let conn = Connection::open("../../firewall.db")?;
-    let mut stmt = conn.prepare("SELECT ip FROM blocklist")?;
-    let ips: Vec<String> = stmt.query_map([], |row| row.get(0))?.filter_map(Result::ok).collect();
+    let ips: Vec<String> = {
+        let conn = Connection::open("../../firewall.db")?;
+        let mut stmt = conn.prepare("SELECT ip FROM blocklist")?;
+        let result: Vec<String> = stmt.query_map([], |row| row.get(0))?.filter_map(Result::ok).collect();
+        result
+    };
 
     let mut bpf_guard = bpf_wrapper.lock().await;
     if let Some(bpf) = bpf_guard.as_mut() {
@@ -107,8 +109,8 @@ async fn sync_sqlite_to_ebpf(bpf_wrapper: &Arc<Mutex<Option<Ebpf>>>) -> Result<(
         
         for ip_str in ips {
             if let Ok(ip_addr) = Ipv4Addr::from_str(&ip_str) {
-                // XDP processes IPs in big-endian over the wire, but Ipv4Addr octets can be manipulated
-                let ip_u32 = u32::from_ne_bytes(ip_addr.octets());
+                // Convert IP to native u32 format to exactly match u32::from_be() in the eBPF program
+                let ip_u32 = u32::from(ip_addr);
                 // Insert into XDP map
                 let _ = blocklist_map.insert(ip_u32, 1, 0);
             }
@@ -135,8 +137,9 @@ async fn sync_nftables() -> Result<(), anyhow::Error> {
     })?;
 
     // We build an nftables configuration file for the 'inet' family.
-    // This table 'firewall' and chain 'custom_rules' will be completely flushed and rewritten.
-    let mut nft_config = String::from("flush table inet firewall\n");
+    // Ensure the table exists before trying to flush it
+    let mut nft_config = String::from("add table inet firewall\n");
+    nft_config.push_str("flush table inet firewall\n");
     nft_config.push_str("table inet firewall {\n");
     nft_config.push_str("    chain custom_rules {\n");
     nft_config.push_str("        type filter hook input priority 0; policy accept;\n");
@@ -231,7 +234,7 @@ async fn tail_suricata(bpf_wrapper: Arc<Mutex<Option<Ebpf>>>) -> Result<(), anyh
                 // If it's a high severity threat, block it instantly in eBPF
                 if severity <= 2 && !src_ip.is_empty() {
                     if let Ok(ip_addr) = Ipv4Addr::from_str(src_ip) {
-                        let ip_u32 = u32::from_ne_bytes(ip_addr.octets());
+                        let ip_u32 = u32::from(ip_addr);
                         
                         let mut bpf_guard = bpf_wrapper.lock().await;
                         if let Some(bpf) = bpf_guard.as_mut() {

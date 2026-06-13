@@ -15,25 +15,20 @@ sudo dnf install suricata jq
 
 The primary configuration file is located at `/etc/suricata/suricata.yaml`.
 
-You must modify `suricata.yaml` to ensure it outputs its JSON logs directly to the firewall's `core` directory so the Python orchestrator can read them in real-time.
+You must modify `suricata.yaml` to ensure it outputs its JSON logs to the firewall's `core` directory so the Python orchestrator can read them in real-time.
 
-Find the `outputs` section and configure `eve-log`:
+Find the `outputs` → `eve-log` section. The default Suricata 8.x config already has the correct alert settings (`payload: yes`, `metadata: yes`, `packet: yes`, `flow: true`).
+
+**The only thing you need to change is the `filename`:**
 
 ```yaml
-outputs:
   - eve-log:
       enabled: yes
       filetype: regular
-      filename: /absolute/path/to/FirewallRepo/core/eve.json
-      types:
-        - alert:
-            payload: yes
-            payload-buffer-size: 4kb
-            payload-printable: yes
-            packet: yes
-        - flow
-        - drop
+      filename: /absolute/path/to/FirewallRepo/core/eve.json   # ← Change this path
 ```
+
+> Leave the rest of the `alert` and `metadata` settings at their defaults — they are already correctly configured for our Rust daemon to parse.
 
 ## 3. Managing Suricata Rules
 Suricata uses the Emerging Threats (ET) ruleset by default. To download and update the rules to the latest signatures, run:
