@@ -1,9 +1,10 @@
 # Core Backend — Developer Documentation
 
-**Branch:** `beta-testing`  
 **Location:** `core/`  
 **Stack:** Python 3 · FastAPI · SQLite (aiosqlite) · JWT · Suricata · Rust/eBPF/XDP (Data Plane)  
 **Last updated:** 2026-06-13
+
+**Author:** `Bikesh`
 
 ---
 
