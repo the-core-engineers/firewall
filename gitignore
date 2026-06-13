@@ -1,0 +1,45 @@
+# Node/React/Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.venv/
+env/
+
+# Database
+firewall.db
+*.sqlite3
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Rust build artifacts ──────────────────────────────────────────────────────
+# The compiled XDP eBPF ELF and the engine binary — these are large and
+# should be built on the target machine, not committed to git.
+target/
+
+# The engine embeds the XDP ELF at compile time from this path:
+#   target/bpfel-unknown-none/release/xdp-firewall
+# So you MUST compile xdp-firewall before building the engine.
+# See run.sh for the correct build order.
+
+# Suricata runtime files (generated, not committed)
+/var/log/suricata/
+/etc/suricata/linuxshield.yaml
